@@ -1,0 +1,167 @@
+import { OfferSource, OfferStatus, Platform } from '@prisma/client';
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { prisma, num } from '../db.js';
+import { ingestUrl } from '../services/ingest.js';
+import { sendOffer } from '../services/dispatch.js';
+import { renderMessage } from '../services/message.js';
+import { lowestPrice } from '../services/scoring.js';
+import { connectors, connectorList } from '../connectors/index.js';
+import { ingestProduct } from '../services/ingest.js';
+import { env } from '../env.js';
+
+const serialize = (o: any) => ({
+  id: o.id,
+  status: o.status,
+  source: o.source,
+  score: o.score,
+  scoreReasons: o.scoreReasons ?? [],
+  price: num(o.price),
+  comparePrice: num(o.comparePrice),
+  discountPct: num(o.discountPct),
+  commissionBrl: num(o.commissionBrl),
+  message: o.message,
+  couponCode: o.couponCode,
+  affiliateUrl: o.affiliateUrl,
+  shortCode: o.shortLink?.code ?? null,
+  clicks: o.shortLink?.clickCount ?? 0,
+  scheduledFor: o.scheduledFor,
+  sentAt: o.sentAt,
+  failReason: o.failReason,
+  createdAt: o.createdAt,
+  product: {
+    id: o.product.id,
+    title: o.product.title,
+    imageUrl: o.product.imageUrl,
+    platform: o.product.platform,
+    canonicalUrl: o.product.canonicalUrl,
+    rating: num(o.product.rating),
+    reviewCount: o.product.reviewCount,
+  },
+});
+
+export async function offerRoutes(app: FastifyInstance) {
+  /** Fila de curadoria, ordenada pela nota. */
+  app.get<{ Querystring: { status?: OfferStatus; limit?: string } }>('/api/offers', async (req) => {
+    const status = req.query.status ?? OfferStatus.PENDING;
+    const offers = await prisma.offer.findMany({
+      where: { status },
+      include: { product: true, shortLink: true },
+      orderBy: status === OfferStatus.PENDING ? [{ score: 'desc' }, { createdAt: 'desc' }] : { createdAt: 'desc' },
+      take: Number(req.query.limit ?? 60),
+    });
+    return offers.map(serialize);
+  });
+
+  /** Modo manual: voce cola o link, o sistema faz o resto. */
+  app.post<{ Body: { url: string; note?: string } }>('/api/offers', async (req, reply) => {
+    const { url, note } = z.object({ url: z.string().url(), note: z.string().max(400).optional() }).parse(req.body);
+    try {
+      const offer = await ingestUrl(url, OfferSource.MANUAL, note);
+      const full = await prisma.offer.findUnique({
+        where: { id: offer.id },
+        include: { product: true, shortLink: true },
+      });
+      return serialize(full);
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'falha ao capturar a oferta' });
+    }
+  });
+
+  /** Busca direta nas plataformas conectadas, pra garimpar na hora. */
+  app.get<{ Querystring: { q: string; platform?: Platform } }>('/api/search', async (req, reply) => {
+    const q = (req.query.q ?? '').trim();
+    if (q.length < 2) return reply.code(400).send({ error: 'Digite pelo menos 2 caracteres.' });
+
+    const targets = req.query.platform ? [connectors[req.query.platform]] : connectorList;
+    const results = await Promise.allSettled(targets.map((c) => c.search({ keyword: q, limit: 8 })));
+
+    return results.flatMap((r, i) =>
+      r.status === 'fulfilled'
+        ? r.value.map((p) => ({ ...p, ok: true }))
+        : [{ platform: targets[i].platform, error: String(r.reason?.message ?? r.reason), ok: false }],
+    );
+  });
+
+  /** Transforma um resultado de busca em oferta na fila. */
+  app.post<{ Body: { platform: Platform; externalId: string } }>('/api/offers/from-product', async (req, reply) => {
+    const { platform, externalId } = z
+      .object({ platform: z.nativeEnum(Platform), externalId: z.string() })
+      .parse(req.body);
+    const found = await connectors[platform].getProduct(externalId);
+    if (!found) return reply.code(404).send({ error: 'Produto nao encontrado na API da loja.' });
+    const offer = await ingestProduct(found, OfferSource.MANUAL);
+    const full = await prisma.offer.findUnique({
+      where: { id: offer.id },
+      include: { product: true, shortLink: true },
+    });
+    return serialize(full);
+  });
+
+  /** Editar o texto antes de mandar. */
+  app.patch<{ Params: { id: string }; Body: { message?: string; couponCode?: string } }>(
+    '/api/offers/:id',
+    async (req) => {
+      const body = z
+        .object({ message: z.string().max(4000).optional(), couponCode: z.string().max(40).nullish() })
+        .parse(req.body);
+      const offer = await prisma.offer.update({
+        where: { id: req.params.id },
+        data: { message: body.message, couponCode: body.couponCode ?? undefined },
+        include: { product: true, shortLink: true },
+      });
+      return serialize(offer);
+    },
+  );
+
+  /** Regenerar o texto a partir do template, se voce editou demais e quer voltar. */
+  app.post<{ Params: { id: string }; Body: { note?: string } }>('/api/offers/:id/rebuild', async (req) => {
+    const offer = await prisma.offer.findUniqueOrThrow({
+      where: { id: req.params.id },
+      include: { product: true, shortLink: true },
+    });
+    const message = renderMessage({
+      platform: offer.product.platform,
+      title: offer.product.title,
+      price: Number(offer.price),
+      comparePrice: num(offer.comparePrice),
+      discountPct: num(offer.discountPct),
+      lowest: await lowestPrice(offer.productId),
+      couponCode: offer.couponCode,
+      link: `${env.publicUrl}/r/${offer.shortLink?.code}`,
+      note: req.body?.note,
+    });
+    const updated = await prisma.offer.update({
+      where: { id: offer.id },
+      data: { message },
+      include: { product: true, shortLink: true },
+    });
+    return serialize(updated);
+  });
+
+  app.post<{ Params: { id: string }; Body: { groupJid?: string } }>('/api/offers/:id/send', async (req, reply) => {
+    try {
+      const offer = await sendOffer(req.params.id, req.body?.groupJid);
+      return { ok: true, sentAt: offer.sentAt };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : 'falha no envio' });
+    }
+  });
+
+  app.post<{ Params: { id: string }; Body: { when: string; groupJid?: string } }>(
+    '/api/offers/:id/schedule',
+    async (req) => {
+      const { when, groupJid } = z.object({ when: z.string(), groupJid: z.string().optional() }).parse(req.body);
+      await prisma.offer.update({
+        where: { id: req.params.id },
+        data: { status: OfferStatus.QUEUED, scheduledFor: new Date(when), groupJid },
+      });
+      return { ok: true };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>('/api/offers/:id/skip', async (req) => {
+    await prisma.offer.update({ where: { id: req.params.id }, data: { status: OfferStatus.SKIPPED } });
+    return { ok: true };
+  });
+}

@@ -1,0 +1,16 @@
+{
+  "name": "oferta-hub",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["apps/api", "apps/web"],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/api & npm run dev --workspace=apps/web",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "db:push": "npm run db:push --workspace=apps/api",
+    "db:studio": "npm run db:studio --workspace=apps/api",
+    "build": "npm run build --workspace=apps/api && npm run build --workspace=apps/web",
+    "keygen": "node -e \"console.log('MASTER_KEY=' + require('crypto').randomBytes(32).toString('hex'))\""
+  },
+  "engines": { "node": ">=20" }
+}

@@ -1,0 +1,81 @@
+import { useEffect, useState } from 'react';
+import { Route, Routes } from 'react-router-dom';
+import { api } from './api.js';
+import { Layout } from './components/Layout.js';
+import { Fila } from './pages/Fila.js';
+import { Desempenho } from './pages/Desempenho.js';
+import { Produtos } from './pages/Produtos.js';
+import { Agenda } from './pages/Agenda.js';
+import { Conexoes } from './pages/Conexoes.js';
+
+function Login({ onIn }: { onIn: () => void }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/api/login', { password });
+      onIn();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não deu para entrar.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="login">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <h1>Oferta Hub</h1>
+        <div className="field">
+          <label htmlFor="pw">Senha do painel</label>
+          <input
+            id="pw"
+            type="password"
+            autoFocus
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        {error && <div className="notice">{error}</div>}
+        <button className="btn" disabled={busy || !password}>
+          {busy ? 'Entrando...' : 'Entrar'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+export default function App() {
+  const [auth, setAuth] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ authenticated: boolean }>('/api/me')
+      .then((r) => setAuth(r.authenticated))
+      .catch(() => setAuth(false));
+  }, []);
+
+  if (auth === null) return null;
+  if (!auth) return <Login onIn={() => setAuth(true)} />;
+
+  return (
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Fila />} />
+        <Route path="/desempenho" element={<Desempenho />} />
+        <Route path="/produtos" element={<Produtos />} />
+        <Route path="/agenda" element={<Agenda />} />
+        <Route path="/conexoes" element={<Conexoes />} />
+      </Routes>
+    </Layout>
+  );
+}

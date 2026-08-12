@@ -1,0 +1,204 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  AMAZON
+  MERCADO_LIVRE
+  SHOPEE
+  ALIEXPRESS
+  AWIN
+  LOMADEE
+}
+
+enum OfferStatus {
+  PENDING // esperando sua analise na fila
+  QUEUED // aprovada, aguardando horario
+  SENT
+  SKIPPED
+  FAILED
+}
+
+enum OfferSource {
+  MANUAL // voce colou o link
+  WATCHLIST // caiu de preco em um produto vigiado
+  DISCOVERY // garimpo automatico
+}
+
+/// Credenciais de API por plataforma. O campo `payload` guarda um JSON
+/// criptografado com AES-256-GCM (ver src/lib/crypto.ts).
+model Credential {
+  id        String   @id @default(cuid())
+  platform  Platform @unique
+  payload   String
+  label     String?
+  active    Boolean  @default(true)
+  lastCheck DateTime?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  platform      Platform
+  externalId    String
+  title         String
+  imageUrl      String?
+  canonicalUrl  String
+  category      String?
+  brand         String?
+  currentPrice  Decimal? @db.Decimal(12, 2)
+  listPrice     Decimal? @db.Decimal(12, 2)
+  commissionPct Decimal? @db.Decimal(6, 3)
+  rating        Decimal? @db.Decimal(3, 2)
+  reviewCount   Int?
+  available     Boolean  @default(true)
+  lastSyncAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  snapshots PriceSnapshot[]
+  offers    Offer[]
+  watch     WatchItem?
+
+  @@unique([platform, externalId])
+  @@index([platform, category])
+}
+
+/// Uma leitura de preco no tempo. E daqui que sai o historico e o "menor preco em 90 dias".
+model PriceSnapshot {
+  id        String   @id @default(cuid())
+  productId String
+  price     Decimal  @db.Decimal(12, 2)
+  available Boolean  @default(true)
+  takenAt   DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, takenAt])
+}
+
+model Offer {
+  id       String      @id @default(cuid())
+  productId String
+  source   OfferSource
+  status   OfferStatus @default(PENDING)
+
+  price         Decimal  @db.Decimal(12, 2)
+  comparePrice  Decimal? @db.Decimal(12, 2)
+  discountPct   Decimal? @db.Decimal(6, 2)
+  /// Comissao estimada em reais no momento da captura.
+  commissionBrl Decimal? @db.Decimal(12, 2)
+  /// 0 a 100. Ordena a fila de curadoria. Ver services/scoring.ts
+  score         Int      @default(0)
+  scoreReasons  Json?
+
+  affiliateUrl String
+  message      String
+  couponCode   String?
+
+  scheduledFor DateTime?
+  sentAt       DateTime?
+  failReason   String?
+  groupJid     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product     Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  shortLink   ShortLink?
+  conversions Conversion[]
+
+  @@index([status, score])
+  @@index([createdAt])
+}
+
+model ShortLink {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  targetUrl String
+  offerId   String?  @unique
+  clickCount Int     @default(0)
+  createdAt DateTime @default(now())
+
+  offer  Offer?  @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  clicks Click[]
+}
+
+model Click {
+  id          String   @id @default(cuid())
+  shortLinkId String
+  /// Hash do IP (nunca guardamos o IP puro).
+  ipHash      String?
+  userAgent   String?
+  referer     String?
+  clickedAt   DateTime @default(now())
+
+  shortLink ShortLink @relation(fields: [shortLinkId], references: [id], onDelete: Cascade)
+
+  @@index([shortLinkId, clickedAt])
+}
+
+/// Vendas confirmadas. Chegam pelo sync das APIs de relatorio ou lancamento manual.
+model Conversion {
+  id            String   @id @default(cuid())
+  platform      Platform
+  externalId    String
+  offerId       String?
+  orderValue    Decimal  @db.Decimal(12, 2)
+  commissionBrl Decimal  @db.Decimal(12, 2)
+  status        String   @default("pending")
+  occurredAt    DateTime
+  createdAt     DateTime @default(now())
+
+  offer Offer? @relation(fields: [offerId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, externalId])
+  @@index([occurredAt])
+}
+
+/// Produto que voce escolheu vigiar. Dispara oferta quando cai do gatilho.
+model WatchItem {
+  id           String   @id @default(cuid())
+  productId    String   @unique
+  targetPrice  Decimal? @db.Decimal(12, 2)
+  minDropPct   Decimal  @default(10) @db.Decimal(5, 2)
+  active       Boolean  @default(true)
+  lastFiredAt  DateTime?
+  createdAt    DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+/// Regra de garimpo automatico: palavra-chave ou categoria varrida periodicamente.
+model DiscoveryRule {
+  id            String   @id @default(cuid())
+  platform      Platform
+  keyword       String
+  maxPrice      Decimal? @db.Decimal(12, 2)
+  minDiscount   Decimal  @default(20) @db.Decimal(5, 2)
+  minCommission Decimal  @default(0) @db.Decimal(6, 3)
+  active        Boolean  @default(true)
+  lastRunAt     DateTime?
+  createdAt     DateTime @default(now())
+}
+
+model WhatsappGroup {
+  id        String   @id @default(cuid())
+  jid       String   @unique
+  name      String
+  isDefault Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+/// Contador diario de envios, pra respeitar o teto e nao queimar o numero.
+model SendLog {
+  id     String   @id @default(cuid())
+  day    String   @unique
+  count  Int      @default(0)
+}

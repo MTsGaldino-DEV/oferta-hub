@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+*.log
+apps/api/auth_state/
+apps/api/prisma/dev.db*
+.env.ml
