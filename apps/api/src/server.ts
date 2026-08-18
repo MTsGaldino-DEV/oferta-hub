@@ -6,12 +6,13 @@ import { prisma } from './db.js';
 import { logger } from './lib/logger.js';
 import { authRoutes, requireAuth } from './plugins/auth.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { nichoRoutes } from './routes/nichos.js';
 import { offerRoutes } from './routes/offers.js';
 import { redirectRoutes } from './routes/redirect.js';
 import { statsRoutes } from './routes/stats.js';
 import { watchRoutes } from './routes/watch.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
-import { startWorkers, runDiscovery, runPriceMonitor } from './workers/index.js';
+import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
 import { whatsapp } from './whatsapp/baileys.js';
 
 const app = Fastify({ logger: false, trustProxy: true });
@@ -32,6 +33,7 @@ await app.register(authRoutes);
 await app.register(async (instance) => {
   instance.addHook('onRequest', requireAuth);
   await instance.register(credentialRoutes);
+  await instance.register(nichoRoutes);
   await instance.register(offerRoutes);
   await instance.register(statsRoutes);
   await instance.register(watchRoutes);
@@ -42,6 +44,7 @@ await app.register(async (instance) => {
   // nada acontecer quando a lista esta vazia ou a plataforma recusa.
   instance.post('/api/jobs/price-monitor', async () => ({ ok: true, ...(await runPriceMonitor()) }));
   instance.post('/api/jobs/discovery', async () => ({ ok: true, ...(await runDiscovery()) }));
+  instance.post('/api/jobs/category-sync', async () => ({ ok: true, ...(await runCategorySync()) }));
 });
 
 app.setErrorHandler((error, _req, reply) => {

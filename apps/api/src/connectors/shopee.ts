@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { Platform } from '@prisma/client';
 import { request } from '../lib/http.js';
 import { loadCredentials } from './credentials.js';
-import type { Connector, NormalizedProduct } from './types.js';
+import type { Connector, NormalizedProduct, SearchSort } from './types.js';
 
 /**
  * Shopee Affiliate Open API (GraphQL).
@@ -11,7 +11,7 @@ import type { Connector, NormalizedProduct } from './types.js';
  */
 const ENDPOINT = 'https://open-api.affiliate.shopee.com.br/graphql';
 
-async function gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+export async function shopeeGql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
   const c = await loadCredentials(Platform.SHOPEE);
   const payload = JSON.stringify({ query, variables });
   const timestamp = Math.floor(Date.now() / 1000);
@@ -33,6 +33,9 @@ async function gql<T>(query: string, variables: Record<string, unknown> = {}): P
   return data.data;
 }
 
+/** Apelido curto para o uso interno deste arquivo. */
+const gql = shopeeGql;
+
 function normalize(node: any): NormalizedProduct {
   const price = Number(node.price ?? node.priceMin ?? 0);
   const listPrice = node.priceDiscountRate ? price / (1 - node.priceDiscountRate / 100) : undefined;
@@ -47,7 +50,12 @@ function normalize(node: any): NormalizedProduct {
     listPrice: listPrice ? Number(listPrice.toFixed(2)) : undefined,
     commissionPct: node.commissionRate ? Number(node.commissionRate) * 100 : undefined,
     rating: node.ratingStar ? Number(node.ratingStar) : undefined,
+    // A Shopee nao expoe numero de avaliacoes, so de vendas. Mantemos o valor
+    // tambem em reviewCount porque a nota de reputacao ainda le esse campo --
+    // trocar isso mudaria a ordem da fila e nao e assunto desta fase.
     reviewCount: node.sales,
+    soldCount: node.sales ? Number(node.sales) : undefined,
+    shopName: node.shopName ?? undefined,
     available: true,
   };
 }
@@ -56,6 +64,29 @@ const PRODUCT_FIELDS = `
   itemId shopId productName imageUrl productLink offerLink price priceMin
   priceDiscountRate commissionRate ratingStar sales productCatIds
 `;
+
+/**
+ * sortType da Shopee, levantado na mao contra a API -- eles nao documentam.
+ *   1 e 6 = relevancia (padrao)
+ *   2     = mais vendidos
+ *   3     = preco DEcrescente  <- era o padrao antigo, e por isso a busca
+ *                                 devolvia fone de R$21 mil com zero vendas
+ *   4     = preco crescente
+ *   5     = maior comissao (aparecem itens em 83%)
+ */
+const SORT_TYPE: Record<SearchSort, number> = {
+  relevancia: 1,
+  vendas: 2,
+  'menor-preco': 4,
+  comissao: 5,
+  desconto: 2, // sem sort nativo: puxa por vendas e reordena no cliente
+};
+
+/** Desconto anunciado, usado so para reordenar. */
+function descontoPct(p: NormalizedProduct): number {
+  if (!p.listPrice || !p.price || p.listPrice <= p.price) return 0;
+  return ((p.listPrice - p.price) / p.listPrice) * 100;
+}
 
 export const shopee: Connector = {
   platform: Platform.SHOPEE,
@@ -96,15 +127,11 @@ export const shopee: Connector = {
   },
 
   /**
-   * sortType 2 = mais vendidos. Estava em 3, que e preco DEcrescente: a busca
-   * devolvia o equipamento mais caro do catalogo (fone de R$21 mil, zero
-   * vendas) em vez do que o grupo compra.
-   *
    * A API nao aceita filtro de preco -- so listType/sortType/categoria -- entao
    * o teto de maxPrice e aplicado aqui, sobre um lote maior que o pedido pra
    * sobrar resultado depois do corte.
    */
-  async search({ keyword, categoryId, maxPrice, limit = 20 }) {
+  async search({ keyword, categoryId, maxPrice, sort = 'vendas', limit = 20 }) {
     if (!keyword && !categoryId) throw new Error('Informe um nicho ou uma palavra-chave.');
 
     // Com teto de preco pede lote maior pra sobrar resultado depois do corte.
@@ -113,7 +140,7 @@ export const shopee: Connector = {
     const filtros = [
       categoryId ? `productCatId: ${categoryId}` : '',
       keyword ? `keyword: $keyword` : '',
-      `sortType: 2`,
+      `sortType: ${SORT_TYPE[sort]}`,
       `limit: $limit`,
     ]
       .filter(Boolean)
@@ -126,10 +153,16 @@ export const shopee: Connector = {
       keyword ? { keyword, limit: lote } : { limit: lote },
     );
 
-    const produtos = (data.productOfferV2?.nodes ?? []).map(normalize);
+    const produtos: NormalizedProduct[] = (data.productOfferV2?.nodes ?? []).map(normalize);
     const dentroDoTeto = maxPrice
       ? produtos.filter((p: NormalizedProduct) => p.price !== undefined && p.price <= maxPrice)
       : produtos;
+
+    // A API nao tem ordenacao por desconto. Puxamos por vendas e reordenamos
+    // aqui -- ordenar so por desconto traria o catalogo parado com "de/por" inflado.
+    if (sort === 'desconto') {
+      dentroDoTeto.sort((a, b) => descontoPct(b) - descontoPct(a));
+    }
     return dentroDoTeto.slice(0, limit);
   },
 

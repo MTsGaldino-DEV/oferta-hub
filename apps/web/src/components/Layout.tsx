@@ -6,6 +6,7 @@ import { Logo } from './Logo.js';
 const LINKS = [
   { to: '/', label: 'Fila', end: true },
   { to: '/desempenho', label: 'Desempenho' },
+  { to: '/nichos', label: 'Nichos' },
   { to: '/produtos', label: 'Preços vigiados' },
   { to: '/agenda', label: 'Agenda' },
   { to: '/conexoes', label: 'Conexões' },

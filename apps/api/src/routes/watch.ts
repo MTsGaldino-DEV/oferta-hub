@@ -78,10 +78,14 @@ export async function watchRoutes(app: FastifyInstance) {
 
   /** Regras do garimpo automatico. */
   app.get('/api/discovery', async () => {
-    const rules = await prisma.discoveryRule.findMany({ orderBy: { createdAt: 'desc' } });
+    const rules = await prisma.discoveryRule.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { niche: true },
+    });
     return rules.map((r) => ({
       ...r,
-      nicho: NICHOS_SHOPEE.find((n) => n.id === r.categoryId)?.label ?? null,
+      niche: undefined,
+      nicho: r.niche?.name ?? NICHOS_SHOPEE.find((n) => n.id === r.categoryId)?.label ?? null,
       maxPrice: num(r.maxPrice),
       minDiscount: num(r.minDiscount),
       minCommission: num(r.minCommission),
@@ -104,6 +108,7 @@ export async function watchRoutes(app: FastifyInstance) {
     const body = z
       .object({
         platform: z.nativeEnum(Platform),
+        nicheId: z.string().optional(),
         categoryId: z.number().int().positive().optional(),
         keyword: z.string().min(2).max(80).optional(),
         maxPrice: z.number().positive().optional(),
@@ -112,8 +117,8 @@ export async function watchRoutes(app: FastifyInstance) {
       })
       .parse(req.body);
 
-    // Uma regra sem nicho e sem palavra nao tem o que buscar.
-    if (!body.categoryId && !body.keyword) {
+    // Uma regra sem nicho, sem categoria e sem palavra nao tem o que buscar.
+    if (!body.nicheId && !body.categoryId && !body.keyword) {
       return reply.code(400).send({ error: 'Escolha um nicho ou digite uma palavra-chave.' });
     }
 

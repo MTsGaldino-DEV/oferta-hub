@@ -16,9 +16,19 @@ export interface NormalizedProduct {
   commissionPct?: number;
   rating?: number;
   reviewCount?: number;
+  /** Unidades vendidas. E o filtro que separa "vende" de "esta no catalogo". */
+  soldCount?: number;
+  /** Nome da loja, quando a API informa. */
+  shopName?: string;
   available: boolean;
   couponCode?: string;
 }
+
+/**
+ * Ordenacao da busca. Mapeada empiricamente contra a API da Shopee -- o valor
+ * numerico dela nao e documentado. Ver shopee.ts.
+ */
+export type SearchSort = 'relevancia' | 'vendas' | 'comissao' | 'menor-preco' | 'desconto';
 
 export interface SearchParams {
   /** Opcional quando ha categoria: o nicho inteiro ja e um recorte valido. */
@@ -27,6 +37,8 @@ export interface SearchParams {
   categoryId?: number;
   maxPrice?: number;
   minDiscount?: number;
+  /** Padrao: mais vendidos. E o que separa oferta de vitrine parada. */
+  sort?: SearchSort;
   limit?: number;
 }
 

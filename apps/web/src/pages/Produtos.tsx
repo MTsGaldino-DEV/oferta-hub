@@ -14,13 +14,13 @@ interface Watch {
 
 interface Rule {
   id: string; platform: string; keyword: string | null;
-  categoryId: number | null; nicho: string | null;
+  categoryId: number | null; nicheId: string | null; nicho: string | null;
   maxPrice: number | null; minDiscount: number; minCommission: number; lastRunAt: string | null;
 }
 
-/** Categoria raiz da loja, com o pico de vendas visto no nicho. */
-interface Nicho {
-  id: number; label: string; exemplo: string; pico: number;
+/** Recorte curado de varias categorias. Gerenciado na aba Nichos. */
+interface NichoCurado {
+  id: string; name: string; minSales: number; entries: { categoryId: number }[];
 }
 
 export function Produtos() {
@@ -33,20 +33,20 @@ export function Produtos() {
   // Shopee e a unica que ainda garimpa: o ML bloqueou a busca por palavra.
   const [platform, setPlatform] = useState('SHOPEE');
   const [minDiscount, setMinDiscount] = useState('25');
-  const [categoryId, setCategoryId] = useState('');
+  const [nicheId, setNicheId] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
-  const [nichos, setNichos] = useState<Nicho[]>([]);
+  const [nichos, setNichos] = useState<NichoCurado[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [jobMsg, setJobMsg] = useState<string | null>(null);
   const [jobBusy, setJobBusy] = useState(false);
 
-  const nichoAtual = nichos.find((n) => String(n.id) === categoryId);
+  const nichoAtual = nichos.find((n) => n.id === nicheId);
 
   async function load() {
     setItems(await api.get<Watch[]>('/api/watch'));
     setRules(await api.get<Rule[]>('/api/discovery'));
-    setNichos(await api.get<Nicho[]>('/api/discovery/nichos'));
+    setNichos(await api.get<NichoCurado[]>('/api/nichos'));
   }
 
   useEffect(() => {
@@ -78,13 +78,13 @@ export function Produtos() {
     try {
       await api.post('/api/discovery', {
         platform,
-        categoryId: categoryId ? Number(categoryId) : undefined,
+        nicheId: nicheId || undefined,
         keyword: keyword.trim() || undefined,
         minDiscount: Number(minDiscount),
         maxPrice: maxPrice ? Number(maxPrice) : undefined,
       });
       setKeyword('');
-      setCategoryId('');
+      setNicheId('');
       setMaxPrice('');
       await load();
     } catch (err) {
@@ -203,15 +203,19 @@ export function Produtos() {
           </div>
           <div className="field" style={{ flex: '2 1 260px' }}>
             <label htmlFor="nicho">Nicho</label>
-            <select id="nicho" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            <select id="nicho" value={nicheId} onChange={(e) => setNicheId(e.target.value)}>
               <option value="">— escolha um nicho —</option>
               {nichos.map((n) => (
                 <option key={n.id} value={n.id}>
-                  {n.label} · até {int(n.pico)} vendas
+                  {n.name}
                 </option>
               ))}
             </select>
-            <small>{nichoAtual ? `ex.: ${nichoAtual.exemplo}` : 'traz os campeões de venda da prateleira'}</small>
+            <small>
+              {nichoAtual
+                ? `${nichoAtual.entries.length} categorias, mín. ${int(nichoAtual.minSales)} vendas`
+                : 'monte e teste os nichos na aba Nichos'}
+            </small>
           </div>
           <div className="field" style={{ flex: '1 1 180px' }}>
             <label htmlFor="kw">Refinar (opcional)</label>
@@ -229,7 +233,7 @@ export function Produtos() {
           </div>
           <button
             className="btn"
-            disabled={busy || (!categoryId && keyword.trim().length < 2)}
+            disabled={busy || (!nicheId && keyword.trim().length < 2)}
             onClick={() => void addRule()}
           >
             Criar regra

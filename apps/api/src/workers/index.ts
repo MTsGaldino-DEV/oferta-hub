@@ -5,6 +5,9 @@ import { logger } from '../lib/logger.js';
 import { sleep } from '../lib/http.js';
 import { connectors } from '../connectors/index.js';
 import { NICHOS_SHOPEE } from '../connectors/nichos.js';
+import { harvestCategories, type CategorySyncSummary } from '../connectors/shopee-feed.js';
+import { NICHOS_PRONTOS } from '../connectors/nichos-prontos.js';
+import { buscarPorNicho, carregarNicho } from '../services/nichos.js';
 import { ingestProduct, upsertProduct } from '../services/ingest.js';
 import { sendOffer } from '../services/dispatch.js';
 
@@ -81,14 +84,21 @@ export async function runPriceMonitor(): Promise<MonitorSummary> {
  * 2) GARIMPO AUTOMATICO -- roda a cada 3 horas.
  * Varre as palavras-chave que voce cadastrou e traz o que passar dos filtros.
  */
-/** Como a regra aparece no resumo: "Beleza e cuidados", "fone", ou os dois. */
-function rotulo(rule: { categoryId: number | null; keyword: string | null }): string {
-  const nicho = NICHOS_SHOPEE.find((n) => n.id === rule.categoryId)?.label;
+/** Como a regra aparece no resumo: "Gamer e setup", "fone", ou os dois. */
+function rotulo(rule: {
+  categoryId: number | null;
+  keyword: string | null;
+  niche?: { name: string } | null;
+}): string {
+  const nicho = rule.niche?.name ?? NICHOS_SHOPEE.find((n) => n.id === rule.categoryId)?.label;
   return [nicho, rule.keyword].filter(Boolean).join(' · ') || 'regra sem filtro';
 }
 
 export async function runDiscovery(): Promise<DiscoverySummary> {
-  const rules = await prisma.discoveryRule.findMany({ where: { active: true } });
+  const rules = await prisma.discoveryRule.findMany({
+    where: { active: true },
+    include: { niche: true },
+  });
   logger.info({ count: rules.length }, 'garimpo iniciado');
   const summary: DiscoverySummary['rules'] = [];
 
@@ -96,14 +106,25 @@ export async function runDiscovery(): Promise<DiscoverySummary> {
     let found = 0;
     let added = 0;
     try {
-      const connector = connectors[rule.platform];
-      const results = await connector.search({
-        keyword: rule.keyword ?? undefined,
-        categoryId: rule.categoryId ?? undefined,
-        maxPrice: num(rule.maxPrice) ?? undefined,
-        limit: 20,
-      });
-      found = results.length;
+      // Regra com nicho varre todas as categorias do recorte e filtra por
+      // termo; sem nicho, cai no modo antigo de uma categoria/palavra so.
+      let results;
+      if (rule.nicheId) {
+        const nicho = await carregarNicho(rule.nicheId);
+        if (!nicho) throw new Error('O nicho dessa regra foi apagado.');
+        const busca = await buscarPorNicho(nicho, { maxPrice: num(rule.maxPrice) ?? undefined });
+        results = busca.achados.map((a) => a.produto).slice(0, 20);
+        found = busca.resumo.aceitos;
+      } else {
+        const connector = connectors[rule.platform];
+        results = await connector.search({
+          keyword: rule.keyword ?? undefined,
+          categoryId: rule.categoryId ?? undefined,
+          maxPrice: num(rule.maxPrice) ?? undefined,
+          limit: 20,
+        });
+        found = results.length;
+      }
 
       const minDiscount = num(rule.minDiscount) ?? 20;
       const minCommission = num(rule.minCommission) ?? 0;
@@ -206,11 +227,58 @@ export async function runConversionSync() {
   }
 }
 
+/**
+ * 5) CATALOGO DE CATEGORIAS -- roda toda segunda de madrugada.
+ * Colhe as categorias do datafeed da Shopee e semeia os nichos prontos.
+ * Semanal porque o catalogo praticamente nao muda: na medicao, 30 raizes e
+ * ~276 categorias, estaveis. O feed em si e diario, mas so os produtos mudam.
+ */
+export async function runCategorySync(): Promise<CategorySyncSummary & { nichosCriados: number }> {
+  const resumo = await harvestCategories();
+  logger.info(resumo, 'catalogo de categorias atualizado');
+  const nichosCriados = await seedNichosProntos();
+  return { ...resumo, nichosCriados };
+}
+
+/**
+ * Cria os nichos que vem prontos, uma vez so. Se voce editar um deles depois,
+ * a edicao fica: o seed nunca sobrescreve nicho que ja existe.
+ */
+export async function seedNichosProntos(): Promise<number> {
+  let criados = 0;
+  for (const pronto of NICHOS_PRONTOS) {
+    const existe = await prisma.niche.findUnique({
+      where: { platform_name: { platform: pronto.platform, name: pronto.name } },
+    });
+    if (existe) continue;
+
+    await prisma.niche.create({
+      data: {
+        platform: pronto.platform,
+        name: pronto.name,
+        minSales: pronto.minSales,
+        excludeTerms: pronto.excludeTerms,
+        builtIn: true,
+        entries: {
+          create: pronto.entries.map((e) => ({
+            categoryId: e.categoryId,
+            requireTerms: e.requireTerms,
+          })),
+        },
+      },
+    });
+    criados++;
+    logger.info({ nicho: pronto.name }, 'nicho pronto criado');
+  }
+  return criados;
+}
+
 export function startWorkers() {
   const tz = 'America/Sao_Paulo';
   cron.schedule('*/1 * * * *', () => void runScheduler(), { timezone: tz });
   cron.schedule('7 * * * *', () => void runPriceMonitor(), { timezone: tz });
   cron.schedule('23 */3 * * *', () => void runDiscovery(), { timezone: tz });
   cron.schedule('40 6,18 * * *', () => void runConversionSync(), { timezone: tz });
+  cron.schedule('15 4 * * 1', () => void runCategorySync(), { timezone: tz });
   logger.info('workers agendados (fuso America/Sao_Paulo)');
 }

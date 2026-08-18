@@ -5,6 +5,7 @@ import { Layout } from './components/Layout.js';
 import { Logo } from './components/Logo.js';
 import { Fila } from './pages/Fila.js';
 import { Desempenho } from './pages/Desempenho.js';
+import { Nichos } from './pages/Nichos.js';
 import { Produtos } from './pages/Produtos.js';
 import { Agenda } from './pages/Agenda.js';
 import { Conexoes } from './pages/Conexoes.js';
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/" element={<Fila />} />
         <Route path="/desempenho" element={<Desempenho />} />
         <Route path="/produtos" element={<Produtos />} />
+        <Route path="/nichos" element={<Nichos />} />
         <Route path="/agenda" element={<Agenda />} />
         <Route path="/conexoes" element={<Conexoes />} />
       </Routes>

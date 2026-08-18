@@ -5,3 +5,5 @@ dist/
 apps/api/auth_state/
 apps/api/prisma/dev.db*
 .env.ml
+*.tsbuildinfo
+Inspiração - Achadinho Pro/

@@ -58,6 +58,9 @@ model Product {
   commissionPct Decimal? @db.Decimal(6, 3)
   rating        Decimal? @db.Decimal(3, 2)
   reviewCount   Int?
+  /// Unidades vendidas na loja. Separa o que vende do que so esta no catalogo.
+  soldCount     Int?
+  shopName      String?
   available     Boolean  @default(true)
   lastSyncAt    DateTime?
   createdAt     DateTime @default(now())
@@ -179,6 +182,10 @@ model WatchItem {
 model DiscoveryRule {
   id            String   @id @default(cuid())
   platform      Platform
+  /// Recorte curado de varias categorias. Quando presente, manda nele:
+  /// categoryId/keyword viram o modo antigo, de uma categoria so.
+  nicheId       String?
+  niche         Niche?   @relation(fields: [nicheId], references: [id], onDelete: SetNull)
   /// Nicho (categoria da loja). E o filtro principal: palavra-chave traz
   /// qualquer coisa que contenha o termo, categoria traz o que o publico
   /// daquele nicho realmente compra.
@@ -191,6 +198,64 @@ model DiscoveryRule {
   active        Boolean  @default(true)
   lastRunAt     DateTime?
   createdAt     DateTime @default(now())
+}
+
+/// Categoria da loja, colhida do datafeed de afiliados.
+/// A Shopee nao publica listagem de categorias na API; os nomes e IDs saem das
+/// colunas global_catid1/2 do feed diario. Ver connectors/shopee-feed.ts
+model Category {
+  platform   Platform
+  externalId Int
+  /// Nulo = categoria raiz. Preenchido = filha dessa raiz.
+  parentId   Int?
+  nameEn     String
+  nameBr     String
+  /// Quantos itens do feed cairam aqui. Termometro do tamanho da prateleira.
+  itemCount  Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@id([platform, externalId])
+  @@index([platform, parentId])
+}
+
+/// Nicho = recorte curado de varias categorias, com filtro de termos.
+///
+/// Existe porque categoria sozinha nao entrega nicho. Medido na Shopee: a
+/// prateleira "Fones" e 99% TWS generico, "Microfones" e lapela, "Moveis"
+/// esconde a cadeira gamer no meio de mesa de cabeceira. Um nicho de verdade e
+/// um conjunto de categorias + o que aceitar dentro de cada uma.
+model Niche {
+  id           String   @id @default(cuid())
+  platform     Platform
+  name         String
+  /// Corta o que nao vende. E o filtro que mais limpa a lista.
+  minSales     Int      @default(0)
+  /// Barra o titulo que bater qualquer um destes, em qualquer categoria.
+  excludeTerms String[] @default([])
+  /// Nicho que vem pronto no sistema. Nao e apagavel, so editavel.
+  builtIn      Boolean  @default(false)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  entries NicheCategory[]
+  rules   DiscoveryRule[]
+
+  @@unique([platform, name])
+}
+
+/// Uma categoria dentro de um nicho.
+model NicheCategory {
+  id         String @id @default(cuid())
+  nicheId    String
+  categoryId Int
+  /// Vazio = a categoria inteira entra (ja e pura o bastante: Consoles,
+  /// Teclados e mouses). Preenchido = so entra titulo que bater um dos termos,
+  /// que e como se pesca "headset gamer" de dentro de "Fones".
+  requireTerms String[] @default([])
+
+  niche Niche @relation(fields: [nicheId], references: [id], onDelete: Cascade)
+
+  @@unique([nicheId, categoryId])
 }
 
 model WhatsappGroup {
