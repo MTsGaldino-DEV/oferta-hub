@@ -189,9 +189,11 @@ export function Conexoes() {
         )}
       </div>
 
-      {platforms.map((p) => (
-        <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
-      ))}
+      {[...platforms]
+        .sort((a, b) => Number(b.connected) - Number(a.connected))
+        .map((p) => (
+          <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
+        ))}
     </>
   );
 }
