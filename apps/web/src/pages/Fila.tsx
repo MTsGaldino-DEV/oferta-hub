@@ -14,8 +14,17 @@ interface Found {
   error?: string;
 }
 
+/** Quantas ofertas cada nicho tem parada na fila. */
+interface AbaNicho {
+  nicheId: string;
+  nome: string;
+  total: number;
+}
+
 export function Fila() {
   const [offers, setOffers] = useState<Offer[]>([]);
+  const [abas, setAbas] = useState<AbaNicho[]>([]);
+  const [aba, setAba] = useState('');
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState('');
   const [note, setNote] = useState('');
@@ -29,18 +38,21 @@ export function Fila() {
   const [editing, setEditing] = useState<Offer | null>(null);
   const [draft, setDraft] = useState('');
 
-  async function load() {
+  async function load(filtro = aba) {
     setLoading(true);
     try {
-      setOffers(await api.get<Offer[]>('/api/offers?status=PENDING'));
+      const query = filtro ? `&nicheId=${encodeURIComponent(filtro)}` : '';
+      setOffers(await api.get<Offer[]>(`/api/offers?status=PENDING${query}`));
+      setAbas(await api.get<AbaNicho[]>('/api/offers/por-nicho?status=PENDING'));
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    void load(aba);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aba]);
 
   async function addUrl() {
     setAdding(true);
@@ -77,14 +89,27 @@ export function Fila() {
     setOffers((prev) => [offer, ...prev]);
   }
 
+  /** Tira a oferta da lista e corrige o contador da aba sem recarregar tudo. */
+  function retirar(id: string) {
+    const saindo = offers.find((o) => o.id === id);
+    setTimeout(() => {
+      setOffers((prev) => prev.filter((o) => o.id !== id));
+      setAbas((prev) =>
+        prev
+          .map((a) => (a.nicheId === (saindo?.nicheId ?? 'sem-nicho') ? { ...a, total: a.total - 1 } : a))
+          .filter((a) => a.total > 0),
+      );
+    }, 220);
+  }
+
   async function send(id: string) {
     await api.post(`/api/offers/${id}/send`);
-    setTimeout(() => setOffers((prev) => prev.filter((o) => o.id !== id)), 220);
+    retirar(id);
   }
 
   async function skip(id: string) {
     await api.post(`/api/offers/${id}/skip`);
-    setTimeout(() => setOffers((prev) => prev.filter((o) => o.id !== id)), 220);
+    retirar(id);
   }
 
   async function saveDraft() {
@@ -205,6 +230,24 @@ export function Fila() {
       </div>
 
       <div style={{ height: 20 }} />
+
+      {abas.length > 1 && (
+        <div className="tabs">
+          <button className="tabs__item" data-on={aba === ''} onClick={() => setAba('')}>
+            Todos <span>{abas.reduce((n, a) => n + a.total, 0)}</span>
+          </button>
+          {abas.map((a) => (
+            <button
+              key={a.nicheId}
+              className="tabs__item"
+              data-on={aba === a.nicheId}
+              onClick={() => setAba(a.nicheId)}
+            >
+              {a.nome} <span>{a.total}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {loading ? null : offers.length === 0 ? (
         <div className="empty">

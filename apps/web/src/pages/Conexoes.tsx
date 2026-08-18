@@ -181,11 +181,30 @@ export function Conexoes() {
             </ol>
           </div>
         ) : (
-          <div className="row">
-            <button className="btn" onClick={async () => { await api.post('/api/whatsapp/connect'); void loadWa(); }}>
-              {wa?.status === 'connecting' ? 'Conectando...' : 'Parear número'}
-            </button>
-          </div>
+          <>
+            <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: 14 }}>
+              Desconectado. Clique em parear e o QR aparece aqui.
+            </p>
+            <div className="row">
+              <button className="btn" onClick={async () => { await api.post('/api/whatsapp/connect'); void loadWa(); }}>
+                {wa?.status === 'connecting' ? 'Conectando...' : 'Parear número'}
+              </button>
+              {/* Saida de emergencia: sessao morta em disco faz o Baileys tentar
+                  logar com credencial invalida e voltar pra "desconectado" sem
+                  nunca gerar QR. Aqui o operador apaga e recomeca. */}
+              <button
+                className="btn btn--ghost"
+                onClick={async () => {
+                  if (!confirm('Isso apaga a sessão salva. Você vai precisar ler o QR de novo. Continuar?')) return;
+                  await api.post('/api/whatsapp/logout');
+                  await api.post('/api/whatsapp/connect');
+                  void loadWa();
+                }}
+              >
+                Apagar sessão e parear do zero
+              </button>
+            </div>
+          </>
         )}
       </div>
 

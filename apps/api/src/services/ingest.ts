@@ -62,7 +62,7 @@ export async function upsertProduct(p: NormalizedProduct) {
 export async function ingestUrl(
   rawUrl: string,
   source: OfferSource = OfferSource.MANUAL,
-  note?: string,
+  opcoes: IngestOptions = {},
 ): Promise<Offer> {
   // Link curto de loja (s.shopee.com.br, meli.la...) nao carrega o codigo do
   // produto: e preciso abrir pra descobrir o destino. O link colado e guardado
@@ -91,16 +91,27 @@ export async function ingestUrl(
 
   // Link ja encurtado pela loja manda no texto: preserva a atribuicao que ele
   // carrega (matt_tool no ML, sub_id na Shopee) em vez de remontar do zero.
-  return ingestProduct(found, source, note, isShortUrl(rawUrl) ? rawUrl : undefined);
+  return ingestProduct(found, source, {
+    ...opcoes,
+    linkPronto: isShortUrl(rawUrl) ? rawUrl : opcoes.linkPronto,
+  });
+}
+
+export interface IngestOptions {
+  /** Texto livre que voce digita antes de enviar. */
+  note?: string;
+  /** Link ja encurtado pela loja, quando o operador colou um. Tem precedencia. */
+  linkPronto?: string;
+  /** Nicho que produziu a oferta. Deixa a fila separada por prateleira. */
+  nicheId?: string;
 }
 
 export async function ingestProduct(
   found: NormalizedProduct,
   source: OfferSource,
-  note?: string,
-  /** Link ja encurtado pela loja, quando o operador colou um. Tem precedencia. */
-  linkPronto?: string,
+  opcoes: IngestOptions = {},
 ): Promise<Offer> {
+  const { note, linkPronto, nicheId } = opcoes;
   const connector = connectors[found.platform];
   const product = await upsertProduct(found);
   const price = found.price ?? 0;
@@ -132,6 +143,7 @@ export async function ingestProduct(
       scoreReasons: scored.reasons,
       affiliateUrl,
       couponCode: found.couponCode,
+      nicheId,
       message: '',
     },
   });

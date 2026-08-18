@@ -45,6 +45,7 @@ export function PriceTag({ offer, onSend, onSkip, onEdit }: Props) {
           <div className="tag__store">
             {STORE[offer.product.platform]} · {offer.source === 'MANUAL' ? 'manual' : offer.source === 'WATCHLIST' ? 'queda de preço' : 'garimpo'}
           </div>
+          {offer.nicho && <div className="tag__nicho">{offer.nicho}</div>}
         </div>
       </div>
 

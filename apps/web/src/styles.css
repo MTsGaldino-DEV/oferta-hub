@@ -871,3 +871,64 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------------- abas de nicho ---------------- */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.tabs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.tabs__item:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.tabs__item[data-on='true'] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.tabs__item span {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--canvas);
+  color: var(--ink);
+  border-radius: 20px;
+  padding: 1px 7px;
+}
+
+.tabs__item[data-on='true'] span {
+  background: var(--brand);
+}
+
+/* Nicho de origem, colado logo abaixo da loja na etiqueta. */
+.tag__nicho {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  background: var(--brand);
+  color: var(--ink);
+  border-radius: 2px;
+  padding: 1px 6px;
+}

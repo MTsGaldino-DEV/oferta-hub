@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
   DisconnectReason,
@@ -41,6 +42,7 @@ class WhatsAppService {
   async connect(): Promise<void> {
     if (this.status === 'connecting' || this.status === 'connected') return;
     this.status = 'connecting';
+    this.qrDataUrl = null;
 
     const { state, saveCreds } = await useMultiFileAuthState(env.wa.stateDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -81,7 +83,10 @@ class WhatsAppService {
         this.sock = null;
 
         if (loggedOut) {
-          logger.error('Sessao encerrada no aparelho. Apague a pasta de sessao e pareie de novo.');
+          // A credencial ja nao vale nada -- guardar ela so trava o app num
+          // laco de "desconectado" sem QR. Limpa e deixa pronto pra parear.
+          await this.limparSessao();
+          logger.error('Sessao encerrada no aparelho. Abra Conexoes e leia o QR pra parear de novo.');
         } else {
           logger.warn({ code }, 'conexao caiu, reconectando em 5s');
           setTimeout(() => void this.connect(), 5000);
@@ -90,11 +95,51 @@ class WhatsAppService {
     });
   }
 
+  /**
+   * Encerra a sessao e apaga as credenciais do disco.
+   *
+   * Apagar e o ponto: sem isso, uma sessao morta fica para sempre. O Baileys
+   * reusa a credencial salva, o servidor recusa, e o app volta a "desconectado"
+   * sem nunca gerar QR -- nao ha como parear de novo.
+   */
   async logout() {
     await this.sock?.logout().catch(() => undefined);
+    this.encerrarSocket();
+    await this.limparSessao();
+  }
+
+  private encerrarSocket() {
+    try {
+      this.sock?.end(undefined);
+    } catch {
+      // socket ja morto; nao ha o que encerrar
+    }
     this.sock = null;
     this.status = 'disconnected';
     this.qrDataUrl = null;
+    this.me = null;
+  }
+
+  /**
+   * Zera a pasta de sessao. O proximo connect() nasce pedindo QR.
+   *
+   * Apaga o CONTEUDO, nao a pasta: no Docker ela e um bind mount, e remover o
+   * ponto de montagem devolve EBUSY -- a limpeza falhava calada e a sessao
+   * morta continuava la.
+   */
+  private async limparSessao() {
+    await fs.mkdir(env.wa.stateDir, { recursive: true }).catch(() => undefined);
+    let apagados = 0;
+    try {
+      for (const nome of await fs.readdir(env.wa.stateDir)) {
+        await fs.rm(`${env.wa.stateDir}/${nome}`, { recursive: true, force: true });
+        apagados++;
+      }
+    } catch (err) {
+      logger.error({ dir: env.wa.stateDir, err: String(err) }, 'nao consegui apagar a sessao');
+      throw new Error(`Nao consegui apagar a sessao em ${env.wa.stateDir}: ${String(err)}`);
+    }
+    logger.info({ dir: env.wa.stateDir, apagados }, 'sessao do WhatsApp apagada');
   }
 
   /** Guarda os grupos onde o numero esta, pra voce escolher o destino no dashboard. */

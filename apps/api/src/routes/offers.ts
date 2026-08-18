@@ -29,6 +29,8 @@ const serialize = (o: any) => ({
   message: o.message,
   couponCode: o.couponCode,
   affiliateUrl: o.affiliateUrl,
+  nicheId: o.nicheId,
+  nicho: o.niche?.name ?? null,
   shortCode: o.shortLink?.code ?? null,
   clicks: o.shortLink?.clickCount ?? 0,
   scheduledFor: o.scheduledFor,
@@ -48,25 +50,55 @@ const serialize = (o: any) => ({
 
 export async function offerRoutes(app: FastifyInstance) {
   /** Fila de curadoria, ordenada pela nota. */
-  app.get<{ Querystring: { status?: OfferStatus; limit?: string } }>('/api/offers', async (req) => {
+  app.get<{ Querystring: { status?: OfferStatus; limit?: string; nicheId?: string } }>(
+    '/api/offers',
+    async (req) => {
     const status = req.query.status ?? OfferStatus.PENDING;
+    // "sem-nicho" pega o que foi colado na mao ou veio de regra por palavra.
+    const nicheId = req.query.nicheId;
     const offers = await prisma.offer.findMany({
-      where: { status },
-      include: { product: true, shortLink: true },
+      where: {
+        status,
+        ...(nicheId === 'sem-nicho' ? { nicheId: null } : nicheId ? { nicheId } : {}),
+      },
+      include: { product: true, shortLink: true, niche: true },
       orderBy: status === OfferStatus.PENDING ? [{ score: 'desc' }, { createdAt: 'desc' }] : { createdAt: 'desc' },
       take: Number(req.query.limit ?? 60),
     });
     return offers.map(serialize);
+    },
+  );
+
+  /** Quantas ofertas cada nicho tem parada na fila. Alimenta as abas. */
+  app.get<{ Querystring: { status?: OfferStatus } }>('/api/offers/por-nicho', async (req) => {
+    const status = req.query.status ?? OfferStatus.PENDING;
+    const grupos = await prisma.offer.groupBy({
+      by: ['nicheId'],
+      where: { status },
+      _count: { _all: true },
+    });
+
+    const ids = grupos.map((g) => g.nicheId).filter((id): id is string => Boolean(id));
+    const nichos = await prisma.niche.findMany({ where: { id: { in: ids } } });
+    const nomeDe = new Map(nichos.map((n) => [n.id, n.name]));
+
+    return grupos
+      .map((g) => ({
+        nicheId: g.nicheId ?? 'sem-nicho',
+        nome: g.nicheId ? (nomeDe.get(g.nicheId) ?? 'Nicho apagado') : 'Sem nicho',
+        total: g._count._all,
+      }))
+      .sort((a, b) => b.total - a.total);
   });
 
   /** Modo manual: voce cola o link, o sistema faz o resto. */
   app.post<{ Body: { url: string; note?: string } }>('/api/offers', async (req, reply) => {
     const { url, note } = z.object({ url: z.string().url(), note: z.string().max(400).optional() }).parse(req.body);
     try {
-      const offer = await ingestUrl(url, OfferSource.MANUAL, note);
+      const offer = await ingestUrl(url, OfferSource.MANUAL, { note });
       const full = await prisma.offer.findUnique({
         where: { id: offer.id },
-        include: { product: true, shortLink: true },
+        include: { product: true, shortLink: true, niche: true },
       });
       return serialize(full);
     } catch (err) {
@@ -114,7 +146,7 @@ export async function offerRoutes(app: FastifyInstance) {
       const offer = await prisma.offer.update({
         where: { id: req.params.id },
         data: { message: body.message, couponCode: body.couponCode ?? undefined },
-        include: { product: true, shortLink: true },
+        include: { product: true, shortLink: true, niche: true },
       });
       return serialize(offer);
     },
@@ -124,7 +156,7 @@ export async function offerRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string }; Body: { note?: string } }>('/api/offers/:id/rebuild', async (req) => {
     const offer = await prisma.offer.findUniqueOrThrow({
       where: { id: req.params.id },
-      include: { product: true, shortLink: true },
+      include: { product: true, shortLink: true, niche: true },
     });
     const message = renderMessage({
       platform: offer.product.platform,
@@ -140,7 +172,7 @@ export async function offerRoutes(app: FastifyInstance) {
     const updated = await prisma.offer.update({
       where: { id: offer.id },
       data: { message },
-      include: { product: true, shortLink: true },
+      include: { product: true, shortLink: true, niche: true },
     });
     return serialize(updated);
   });

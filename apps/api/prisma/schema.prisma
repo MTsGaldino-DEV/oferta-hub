@@ -105,6 +105,10 @@ model Offer {
   message      String
   couponCode   String?
 
+  /// De qual nicho essa oferta veio. Nulo = colada na mao ou vinda de regra
+  /// antiga por palavra-chave. E o que deixa a fila separada por prateleira.
+  nicheId      String?
+
   scheduledFor DateTime?
   sentAt       DateTime?
   failReason   String?
@@ -114,10 +118,12 @@ model Offer {
   updatedAt DateTime @updatedAt
 
   product     Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  niche       Niche?       @relation(fields: [nicheId], references: [id], onDelete: SetNull)
   shortLink   ShortLink?
   conversions Conversion[]
 
   @@index([status, score])
+  @@index([nicheId, status])
   @@index([createdAt])
 }
 
@@ -239,6 +245,7 @@ model Niche {
 
   entries NicheCategory[]
   rules   DiscoveryRule[]
+  offers  Offer[]
 
   @@unique([platform, name])
 }

@@ -152,7 +152,7 @@ export async function runDiscovery(): Promise<DiscoverySummary> {
         });
         if (existing?.offers.length) continue;
 
-        await ingestProduct(p, OfferSource.DISCOVERY);
+        await ingestProduct(p, OfferSource.DISCOVERY, { nicheId: rule.nicheId ?? undefined });
         added++;
         await sleep(1200);
       }
