@@ -7,8 +7,14 @@ import { sendOffer } from '../services/dispatch.js';
 import { renderMessage } from '../services/message.js';
 import { lowestPrice } from '../services/scoring.js';
 import { connectors, connectorList } from '../connectors/index.js';
+import type { NormalizedProduct } from '../connectors/types.js';
 import { ingestProduct } from '../services/ingest.js';
 import { env } from '../env.js';
+
+/** Cada item da busca e ou um produto, ou o erro da plataforma que falhou. */
+type SearchHit =
+  | (NormalizedProduct & { ok: true })
+  | { platform: Platform; error: string; ok: false };
 
 const serialize = (o: any) => ({
   id: o.id,
@@ -76,10 +82,10 @@ export async function offerRoutes(app: FastifyInstance) {
     const targets = req.query.platform ? [connectors[req.query.platform]] : connectorList;
     const results = await Promise.allSettled(targets.map((c) => c.search({ keyword: q, limit: 8 })));
 
-    return results.flatMap((r, i) =>
+    return results.flatMap<SearchHit>((r, i) =>
       r.status === 'fulfilled'
-        ? r.value.map((p) => ({ ...p, ok: true }))
-        : [{ platform: targets[i].platform, error: String(r.reason?.message ?? r.reason), ok: false }],
+        ? r.value.map((p) => ({ ...p, ok: true as const }))
+        : [{ platform: targets[i].platform, error: String(r.reason?.message ?? r.reason), ok: false as const }],
     );
   });
 
