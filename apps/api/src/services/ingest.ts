@@ -2,7 +2,7 @@ import { OfferSource, type Offer } from '@prisma/client';
 import { prisma, num } from '../db.js';
 import { shortCode } from '../lib/ids.js';
 import { logger } from '../lib/logger.js';
-import { env } from '../env.js';
+import { isShortUrl, resolveShortUrl } from '../lib/http.js';
 import { connectors, detectPlatform } from '../connectors/index.js';
 import type { NormalizedProduct } from '../connectors/types.js';
 import { lowestPrice, scoreOffer } from './scoring.js';
@@ -60,22 +60,42 @@ export async function ingestUrl(
   source: OfferSource = OfferSource.MANUAL,
   note?: string,
 ): Promise<Offer> {
-  const connector = detectPlatform(rawUrl);
+  // Link curto de loja (s.shopee.com.br, meli.la...) nao carrega o codigo do
+  // produto: e preciso abrir pra descobrir o destino. O link colado e guardado
+  // como está -- ele ja e o link de afiliado e vai inteiro pra mensagem.
+  let alvo = rawUrl;
+  let corpo = '';
+  if (isShortUrl(rawUrl)) {
+    try {
+      const r = await resolveShortUrl(rawUrl);
+      alvo = r.finalUrl;
+      corpo = r.html;
+    } catch {
+      throw new Error('Nao consegui abrir esse link curto. Confira se ele ainda esta no ar.');
+    }
+  }
+
+  const connector = detectPlatform(alvo) ?? detectPlatform(rawUrl);
   if (!connector) throw new Error('Nao reconheci a loja desse link. Plataformas aceitas: Amazon, Mercado Livre, Shopee, AliExpress, Lomadee.');
 
-  const externalId = connector.parseId(rawUrl);
+  // O ML encurtado cai numa pagina social: o codigo so existe no HTML dela.
+  const externalId = connector.parseId(alvo) ?? (corpo ? connector.parseId(corpo) : null);
   if (!externalId) throw new Error(`Nao consegui extrair o codigo do produto na URL da ${connector.label}.`);
 
   const found = await connector.getProduct(externalId);
   if (!found) throw new Error('A API da loja nao devolveu esse produto. Ele pode ter saido do ar.');
 
-  return ingestProduct(found, source, note);
+  // Link ja encurtado pela loja manda no texto: preserva a atribuicao que ele
+  // carrega (matt_tool no ML, sub_id na Shopee) em vez de remontar do zero.
+  return ingestProduct(found, source, note, isShortUrl(rawUrl) ? rawUrl : undefined);
 }
 
 export async function ingestProduct(
   found: NormalizedProduct,
   source: OfferSource,
   note?: string,
+  /** Link ja encurtado pela loja, quando o operador colou um. Tem precedencia. */
+  linkPronto?: string,
 ): Promise<Offer> {
   const connector = connectors[found.platform];
   const product = await upsertProduct(found);
@@ -90,7 +110,11 @@ export async function ingestProduct(
     reviewCount: found.reviewCount,
   });
 
-  const affiliateUrl = await connector.buildAffiliateLink(found.canonicalUrl, found.externalId);
+  // O codigo nasce antes do link: ele vai carimbado como subId, e volta no
+  // relatorio de vendas da loja ligando a venda a esta oferta.
+  const codigo = shortCode();
+  const affiliateUrl =
+    linkPronto ?? (await connector.buildAffiliateLink(found.canonicalUrl, found.externalId, codigo));
 
   const offer = await prisma.offer.create({
     data: {
@@ -108,9 +132,12 @@ export async function ingestProduct(
     },
   });
 
-  // Link curto proprio: e o que permite contar cliques por oferta.
-  const link = await prisma.shortLink.create({
-    data: { code: shortCode(), targetUrl: affiliateUrl, offerId: offer.id },
+  // O ShortLink continua sendo gravado -- guarda o destino real e deixa a
+  // contagem de cliques a um passo de voltar. Mas quem vai na mensagem e o
+  // link da propria loja: e ele que o comprador reconhece e em quem confia,
+  // e a atribuicao da venda ja esta dentro dele.
+  await prisma.shortLink.create({
+    data: { code: codigo, targetUrl: affiliateUrl, offerId: offer.id },
   });
 
   const message = renderMessage({
@@ -121,7 +148,7 @@ export async function ingestProduct(
     discountPct: scored.discountPct,
     lowest: await lowestPrice(product.id),
     couponCode: found.couponCode,
-    link: `${env.publicUrl}/r/${link.code}`,
+    link: affiliateUrl,
     note,
   });
 

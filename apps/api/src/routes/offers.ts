@@ -134,7 +134,7 @@ export async function offerRoutes(app: FastifyInstance) {
       discountPct: num(offer.discountPct),
       lowest: await lowestPrice(offer.productId),
       couponCode: offer.couponCode,
-      link: `${env.publicUrl}/r/${offer.shortLink?.code}`,
+      link: offer.affiliateUrl,
       note: req.body?.note,
     });
     const updated = await prisma.offer.update({

@@ -179,7 +179,12 @@ model WatchItem {
 model DiscoveryRule {
   id            String   @id @default(cuid())
   platform      Platform
-  keyword       String
+  /// Nicho (categoria da loja). E o filtro principal: palavra-chave traz
+  /// qualquer coisa que contenha o termo, categoria traz o que o publico
+  /// daquele nicho realmente compra.
+  categoryId    Int?
+  /// Refinamento opcional dentro do nicho. Nulo = o nicho inteiro.
+  keyword       String?
   maxPrice      Decimal? @db.Decimal(12, 2)
   minDiscount   Decimal  @default(20) @db.Decimal(5, 2)
   minCommission Decimal  @default(0) @db.Decimal(6, 3)

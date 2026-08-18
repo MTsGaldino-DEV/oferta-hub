@@ -4,8 +4,30 @@ import { prisma, num } from '../db.js';
 import { logger } from '../lib/logger.js';
 import { sleep } from '../lib/http.js';
 import { connectors } from '../connectors/index.js';
+import { NICHOS_SHOPEE } from '../connectors/nichos.js';
 import { ingestProduct, upsertProduct } from '../services/ingest.js';
 import { sendOffer } from '../services/dispatch.js';
+
+/**
+ * Resumo do que uma rodada fez. Existe porque disparo manual sem retorno e
+ * indistinguivel de "nao rodou": monitor com lista vazia termina em silencio,
+ * e garimpo que toma 403 da plataforma tambem.
+ */
+export interface MonitorSummary {
+  checked: number;
+  fired: number;
+  failed: number;
+}
+
+export interface DiscoverySummary {
+  rules: {
+    keyword: string;
+    platform: Platform;
+    found: number;
+    added: number;
+    error?: string;
+  }[];
+}
 
 /**
  * 1) MONITOR DE PRECO -- roda de hora em hora.
@@ -13,9 +35,11 @@ import { sendOffer } from '../services/dispatch.js';
  * PENDENTE quando o produto bate seu gatilho. Nada e enviado sozinho: cai na
  * fila e espera voce aprovar.
  */
-export async function runPriceMonitor() {
+export async function runPriceMonitor(): Promise<MonitorSummary> {
   const items = await prisma.watchItem.findMany({ where: { active: true }, include: { product: true } });
   logger.info({ count: items.length }, 'monitor de preco iniciado');
+  let fired = 0;
+  let failed = 0;
 
   for (const item of items) {
     try {
@@ -40,31 +64,46 @@ export async function runPriceMonitor() {
         await ingestProduct(fresh, OfferSource.WATCHLIST);
         await prisma.watchItem.update({ where: { id: item.id }, data: { lastFiredAt: new Date() } });
         logger.info({ product: fresh.title, from: before, to: fresh.price }, 'queda detectada');
+        fired++;
       }
 
       await sleep(1500); // respeita rate limit das APIs
     } catch (err) {
+      failed++;
       logger.warn({ productId: item.productId, err: String(err) }, 'falha ao checar produto');
     }
   }
+
+  return { checked: items.length, fired, failed };
 }
 
 /**
  * 2) GARIMPO AUTOMATICO -- roda a cada 3 horas.
  * Varre as palavras-chave que voce cadastrou e traz o que passar dos filtros.
  */
-export async function runDiscovery() {
+/** Como a regra aparece no resumo: "Beleza e cuidados", "fone", ou os dois. */
+function rotulo(rule: { categoryId: number | null; keyword: string | null }): string {
+  const nicho = NICHOS_SHOPEE.find((n) => n.id === rule.categoryId)?.label;
+  return [nicho, rule.keyword].filter(Boolean).join(' · ') || 'regra sem filtro';
+}
+
+export async function runDiscovery(): Promise<DiscoverySummary> {
   const rules = await prisma.discoveryRule.findMany({ where: { active: true } });
   logger.info({ count: rules.length }, 'garimpo iniciado');
+  const summary: DiscoverySummary['rules'] = [];
 
   for (const rule of rules) {
+    let found = 0;
+    let added = 0;
     try {
       const connector = connectors[rule.platform];
       const results = await connector.search({
-        keyword: rule.keyword,
+        keyword: rule.keyword ?? undefined,
+        categoryId: rule.categoryId ?? undefined,
         maxPrice: num(rule.maxPrice) ?? undefined,
         limit: 20,
       });
+      found = results.length;
 
       const minDiscount = num(rule.minDiscount) ?? 20;
       const minCommission = num(rule.minCommission) ?? 0;
@@ -93,14 +132,20 @@ export async function runDiscovery() {
         if (existing?.offers.length) continue;
 
         await ingestProduct(p, OfferSource.DISCOVERY);
+        added++;
         await sleep(1200);
       }
 
       await prisma.discoveryRule.update({ where: { id: rule.id }, data: { lastRunAt: new Date() } });
+      summary.push({ keyword: rotulo(rule), platform: rule.platform, found, added });
     } catch (err) {
-      logger.warn({ rule: rule.keyword, err: String(err) }, 'falha no garimpo');
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn({ rule: rotulo(rule), err: message }, 'falha no garimpo');
+      summary.push({ keyword: rotulo(rule), platform: rule.platform, found, added, error: message });
     }
   }
+
+  return { rules: summary };
 }
 
 /**

@@ -38,14 +38,10 @@ await app.register(async (instance) => {
   await instance.register(whatsappRoutes);
 
   // Disparo manual dos workers, pra testar sem esperar o cron.
-  instance.post('/api/jobs/price-monitor', async () => {
-    void runPriceMonitor();
-    return { ok: true, message: 'Monitor rodando em segundo plano.' };
-  });
-  instance.post('/api/jobs/discovery', async () => {
-    void runDiscovery();
-    return { ok: true, message: 'Garimpo rodando em segundo plano.' };
-  });
+  // Espera terminar e devolve o resumo: sem isso o clique e indistinguivel de
+  // nada acontecer quando a lista esta vazia ou a plataforma recusa.
+  instance.post('/api/jobs/price-monitor', async () => ({ ok: true, ...(await runPriceMonitor()) }));
+  instance.post('/api/jobs/discovery', async () => ({ ok: true, ...(await runDiscovery()) }));
 });
 
 app.setErrorHandler((error, _req, reply) => {

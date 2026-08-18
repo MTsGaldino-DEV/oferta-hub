@@ -1,6 +1,7 @@
 import { Platform } from '@prisma/client';
 import { request } from '../lib/http.js';
 import { loadCredentials } from './credentials.js';
+import { exigeKeyword } from './types.js';
 import type { Connector, NormalizedProduct } from './types.js';
 
 /**
@@ -47,8 +48,9 @@ export const lomadee: Connector = {
   },
 
   async search({ keyword, maxPrice, limit = 20 }) {
+    const termo = exigeKeyword(keyword, 'Lomadee');
     const data = await api<any>('/offer/_search', {
-      keyword,
+      keyword: termo,
       size: String(limit),
       sort: 'price',
       ...(maxPrice ? { priceMax: String(maxPrice) } : {}),

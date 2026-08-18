@@ -21,10 +21,24 @@ export interface NormalizedProduct {
 }
 
 export interface SearchParams {
-  keyword: string;
+  /** Opcional quando ha categoria: o nicho inteiro ja e um recorte valido. */
+  keyword?: string;
+  /** Nicho na taxonomia da loja. Ver NICHOS_SHOPEE. */
+  categoryId?: number;
   maxPrice?: number;
   minDiscount?: number;
   limit?: number;
+}
+
+/**
+ * So a Shopee expoe nicho na API de afiliados. Nas outras lojas a busca ainda
+ * depende de palavra-chave, e uma regra so de nicho nao tem o que consultar.
+ */
+export function exigeKeyword(keyword: string | undefined, loja: string): string {
+  if (!keyword?.trim()) {
+    throw new Error(`A busca da ${loja} precisa de palavra-chave: essa loja nao tem filtro por nicho.`);
+  }
+  return keyword.trim();
 }
 
 export interface Connector {
@@ -39,8 +53,12 @@ export interface Connector {
   parseId(url: string): string | null;
   getProduct(id: string): Promise<NormalizedProduct | null>;
   search(params: SearchParams): Promise<NormalizedProduct[]>;
-  /** Transforma a URL limpa em link de afiliado rastreado. */
-  buildAffiliateLink(url: string, productId?: string): Promise<string>;
+  /**
+   * Transforma a URL limpa em link de afiliado rastreado.
+   * `subId` e o carimbo que volta no relatorio de vendas da loja e liga a
+   * venda a oferta que a gerou -- usamos o codigo do ShortLink.
+   */
+  buildAffiliateLink(url: string, productId?: string, subId?: string): Promise<string>;
   /** Bate na API so pra validar a credencial na tela de Conexoes. */
   testCredentials(): Promise<void>;
   /** Puxa vendas confirmadas do relatorio da plataforma, quando existir. */
