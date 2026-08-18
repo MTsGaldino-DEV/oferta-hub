@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Hub Ofertas">
+  <!-- Tile escuro: o amarelo da marca sumiria numa aba de navegador clara. -->
+  <rect width="256" height="256" rx="56" fill="#16171a"/>
+  <!-- viewBox interno = bounding box exata do mark, entao ele centraliza sozinho. -->
+  <svg x="68" y="40" width="120" height="176" viewBox="24 16 152 224">
+    <path fill="#ffe01b" d="M24 16 H76 V92 C100 92 100 128 124 128 V16 H176 V240 H124 V164 C100 164 100 128 76 128 V240 H24 Z"/>
+  </svg>
+</svg>

@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { Logo } from './Logo.js';
 
 const LINKS = [
   { to: '/', label: 'Fila', end: true },
@@ -26,7 +27,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <div className="shell">
       <aside className="rail">
         <div className="rail__mark">
-          Oferta<span>Hub</span>
+          <Logo size={34} className="rail__logo" />
+          <div className="rail__wordmark">
+            Hub<span>Ofertas</span>
+          </div>
         </div>
 
         <nav className="rail__nav">

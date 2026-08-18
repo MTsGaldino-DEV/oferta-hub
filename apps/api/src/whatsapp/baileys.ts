@@ -50,7 +50,7 @@ class WhatsAppService {
       auth: state,
       // O dashboard mostra o QR; nao precisamos poluir o terminal.
       printQRInTerminal: false,
-      browser: ['Oferta Hub', 'Chrome', '1.0.0'],
+      browser: ['Hub Ofertas', 'Chrome', '1.0.0'],
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });

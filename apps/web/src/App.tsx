@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { api } from './api.js';
 import { Layout } from './components/Layout.js';
+import { Logo } from './components/Logo.js';
 import { Fila } from './pages/Fila.js';
 import { Desempenho } from './pages/Desempenho.js';
 import { Produtos } from './pages/Produtos.js';
@@ -34,7 +35,12 @@ function Login({ onIn }: { onIn: () => void }) {
           void submit();
         }}
       >
-        <h1>Oferta Hub</h1>
+        <div className="login__brand">
+          <span className="login__mark">
+            <Logo size={30} />
+          </span>
+          <h1>Hub Ofertas</h1>
+        </div>
         <div className="field">
           <label htmlFor="pw">Senha do painel</label>
           <input

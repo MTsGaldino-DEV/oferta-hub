@@ -1,4 +1,4 @@
-# Oferta Hub
+# Hub Ofertas
 
 Painel para operar um grupo de ofertas no WhatsApp. Captura produtos das APIs de afiliado, monitora preço, calcula uma nota para cada oferta, e só envia depois que você aprova.
 
@@ -134,7 +134,7 @@ docker compose up -d db
 # systemd
 sudo tee /etc/systemd/system/ofertahub.service > /dev/null << 'EOF'
 [Unit]
-Description=Oferta Hub API
+Description=Hub Ofertas API
 After=network.target docker.service
 
 [Service]

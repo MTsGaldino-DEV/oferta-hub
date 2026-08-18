@@ -1,15 +1,19 @@
 /* ---------------------------------------------------------------
-   Oferta Hub — sistema visual
+   Hub Ofertas — sistema visual
    Referência: etiqueta de preço de gôndola. Números grandes, papel
    fosco, adesivo amarelo. O painel existe pra você bater o olho e
    decidir "manda ou pula", então o preço é sempre o maior elemento.
    --------------------------------------------------------------- */
 
 :root {
+  /* Amarelo da marca: mesma tinta do logo, do favicon e da etiqueta de preco.
+     Fonte unica da verdade -- --tag existe so como apelido semantico. */
+  --brand: #ffe01b;
+
   --ink: #16171a;
   --canvas: #e8e9eb;
   --surface: #ffffff;
-  --tag: #ffe01b;
+  --tag: var(--brand);
   --drop: #d93a1e;
   --gain: #0c7c4a;
   --muted: #74787f;
@@ -75,16 +79,27 @@ a {
 }
 
 .rail__mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.rail__logo {
+  color: var(--brand);
+  flex: none;
+}
+
+.rail__wordmark {
   font-weight: 800;
   font-size: 17px;
   letter-spacing: -0.04em;
   line-height: 1.1;
-  padding: 0 8px;
 }
 
-.rail__mark span {
+.rail__wordmark span {
   display: block;
-  color: var(--tag);
+  color: var(--brand);
 }
 
 .rail__nav {
@@ -648,6 +663,25 @@ textarea {
   flex-direction: column;
   gap: 14px;
   box-shadow: var(--shadow);
+}
+
+.login__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Amarelo sobre branco nao tem contraste: no fundo claro o mark ganha o mesmo
+   tile escuro do favicon, em vez de virar uma segunda cor de marca. */
+.login__mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--brand);
 }
 
 .login h1 {
