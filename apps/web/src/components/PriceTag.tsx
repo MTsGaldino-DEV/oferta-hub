@@ -97,16 +97,21 @@ export function PriceTag({ offer, onSend, onSkip, onEdit }: Props) {
 
         {error && <div className="card__erro">{error}</div>}
 
+        {/* Pular e Enviar ficam lado a lado, os dois com alvo grande. Enviar e
+            irreversivel, entao errar o Pular nao pode cair nele: empilhados,
+            um deslize de 2px pro lado errado manda a oferta pro grupo. */}
         <div className="card__acoes">
-          <button className="btn btn--bloco" disabled={busy !== null} onClick={() => void act('send')}>
-            {busy === 'send' ? 'Enviando...' : 'Enviar ao grupo'}
-          </button>
+          <div className="card__botoes">
+            <button className="btn btn--ghost btn--alvo" disabled={busy !== null} onClick={() => void act('skip')}>
+              {busy === 'skip' ? '...' : 'Pular'}
+            </button>
+            <button className="btn btn--alvo card__enviar" disabled={busy !== null} onClick={() => void act('send')}>
+              {busy === 'send' ? 'Enviando...' : 'Enviar ao grupo'}
+            </button>
+          </div>
           <div className="card__links">
             <button onClick={() => onEdit(offer)}>Ver texto</button>
             <button onClick={() => setPorque((v) => !v)}>{porque ? 'Fechar' : 'Por quê?'}</button>
-            <button disabled={busy !== null} onClick={() => void act('skip')}>
-              Pular
-            </button>
           </div>
         </div>
 
