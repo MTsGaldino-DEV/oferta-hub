@@ -6,6 +6,7 @@ import { prisma } from './db.js';
 import { logger } from './lib/logger.js';
 import { authRoutes, requireAuth } from './plugins/auth.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
 import { nichoRoutes } from './routes/nichos.js';
 import { offerRoutes } from './routes/offers.js';
 import { redirectRoutes } from './routes/redirect.js';
@@ -19,7 +20,18 @@ const app = Fastify({ logger: false, trustProxy: true });
 
 await app.register(cookie);
 await app.register(cors, {
-  origin: process.env.NODE_ENV === 'production' ? env.publicUrl : ['http://localhost:5173'],
+  // A extensao do navegador fala de chrome-extension://<id>, que muda a cada
+  // instalacao -- por isso o esquema e liberado inteiro. Ela nao usa cookie:
+  // autentica por token no header, entao liberar a origem nao abre sessao.
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // curl, healthcheck, mesma origem
+    if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) {
+      return cb(null, true);
+    }
+    const permitidas =
+      process.env.NODE_ENV === 'production' ? [env.publicUrl] : ['http://localhost:5173'];
+    cb(null, permitidas.includes(origin));
+  },
   credentials: true,
 });
 
@@ -29,10 +41,15 @@ app.get('/health', async () => ({ ok: true, whatsapp: whatsapp.status }));
 await app.register(redirectRoutes);
 await app.register(authRoutes);
 
+// A extensao autentica por token no header, nao por cookie -- fica fora do
+// bloco de sessao.
+await app.register(extensaoRoutes);
+
 // Tudo abaixo exige sessao.
 await app.register(async (instance) => {
   instance.addHook('onRequest', requireAuth);
   await instance.register(credentialRoutes);
+  await instance.register(extensaoAdminRoutes);
   await instance.register(nichoRoutes);
   await instance.register(offerRoutes);
   await instance.register(statsRoutes);

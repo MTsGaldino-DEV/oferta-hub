@@ -265,6 +265,14 @@ model NicheCategory {
   @@unique([nicheId, categoryId])
 }
 
+/// Chave/valor para configuracao do app. Hoje guarda o token da extensao;
+/// serve tambem para as preferencias de mensagem.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 model WhatsappGroup {
   id        String   @id @default(cuid())
   jid       String   @unique

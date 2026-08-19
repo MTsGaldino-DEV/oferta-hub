@@ -1,0 +1,53 @@
+body {
+  width: 270px;
+  margin: 0;
+  padding: 16px;
+  background: #16171a;
+  color: #fff;
+  font: 14px/1.45 system-ui, sans-serif;
+}
+
+.marca { font-weight: 800; font-size: 17px; letter-spacing: -0.04em; margin-bottom: 14px; }
+.marca span { color: #ffe01b; }
+
+label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9aa0a6;
+  margin: 10px 0 4px;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #23252a;
+  border: 1px solid #35383e;
+  border-radius: 4px;
+  color: #fff;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+button {
+  width: 100%;
+  margin-top: 14px;
+  background: #ffe01b;
+  color: #16171a;
+  border: none;
+  border-radius: 4px;
+  padding: 10px;
+  font: 600 14px system-ui, sans-serif;
+  cursor: pointer;
+}
+
+button:disabled { opacity: 0.6; cursor: wait; }
+
+#estado { margin: 10px 0 0; font-size: 12.5px; min-height: 1.2em; }
+#estado[data-tom='ok'] { color: #6fdc9a; }
+#estado[data-tom='erro'] { color: #ff8b7a; }
+
+.dica { margin: 14px 0 0; font-size: 12px; color: #9aa0a6; border-top: 1px solid #35383e; padding-top: 12px; }
+.dica strong { color: #ffe01b; font-weight: 600; }
