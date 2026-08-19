@@ -169,6 +169,7 @@ export async function nichoRoutes(app: FastifyInstance) {
         ok: true,
         bruto: resumo.bruto,
         aceitos: resumo.aceitos,
+        repetidos: resumo.repetidos,
         porCategoria: resumo.porCategoria.map((c) => ({
           ...c,
           nome: nomeDe.get(c.categoryId) ?? `Categoria ${c.categoryId}`,

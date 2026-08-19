@@ -7,6 +7,7 @@ import { connectors } from '../connectors/index.js';
 import { NICHOS_SHOPEE } from '../connectors/nichos.js';
 import { harvestCategories, type CategorySyncSummary } from '../connectors/shopee-feed.js';
 import { NICHOS_PRONTOS } from '../connectors/nichos-prontos.js';
+import { seedCategoriasN3 } from '../connectors/categorias-n3.js';
 import { buscarPorNicho, carregarNicho } from '../services/nichos.js';
 import { ingestProduct, upsertProduct } from '../services/ingest.js';
 import { sendOffer } from '../services/dispatch.js';
@@ -28,6 +29,8 @@ export interface DiscoverySummary {
     platform: Platform;
     found: number;
     added: number;
+    /** Anuncios repetidos do mesmo produto que o nicho colapsou. */
+    repetidos?: number;
     error?: string;
   }[];
 }
@@ -109,12 +112,14 @@ export async function runDiscovery(): Promise<DiscoverySummary> {
       // Regra com nicho varre todas as categorias do recorte e filtra por
       // termo; sem nicho, cai no modo antigo de uma categoria/palavra so.
       let results;
+      let repetidos = 0;
       if (rule.nicheId) {
         const nicho = await carregarNicho(rule.nicheId);
         if (!nicho) throw new Error('O nicho dessa regra foi apagado.');
         const busca = await buscarPorNicho(nicho, { maxPrice: num(rule.maxPrice) ?? undefined });
         results = busca.achados.map((a) => a.produto).slice(0, 20);
         found = busca.resumo.aceitos;
+        repetidos = busca.resumo.repetidos;
       } else {
         const connector = connectors[rule.platform];
         results = await connector.search({
@@ -158,7 +163,7 @@ export async function runDiscovery(): Promise<DiscoverySummary> {
       }
 
       await prisma.discoveryRule.update({ where: { id: rule.id }, data: { lastRunAt: new Date() } });
-      summary.push({ keyword: rotulo(rule), platform: rule.platform, found, added });
+      summary.push({ keyword: rotulo(rule), platform: rule.platform, found, added, repetidos });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn({ rule: rotulo(rule), err: message }, 'falha no garimpo');
@@ -235,6 +240,8 @@ export async function runConversionSync() {
  */
 export async function runCategorySync(): Promise<CategorySyncSummary & { nichosCriados: number }> {
   const resumo = await harvestCategories();
+  // As de nivel 3 nao vem no feed; entram por lista curada.
+  await seedCategoriasN3();
   logger.info(resumo, 'catalogo de categorias atualizado');
   const nichosCriados = await seedNichosProntos();
   return { ...resumo, nichosCriados };

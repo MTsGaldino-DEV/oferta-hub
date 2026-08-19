@@ -35,6 +35,9 @@ export function Fila() {
   const [found, setFound] = useState<Found[] | null>(null);
   const [searching, setSearching] = useState(false);
 
+  const [limpando, setLimpando] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+
   const [editing, setEditing] = useState<Offer | null>(null);
   const [draft, setDraft] = useState('');
 
@@ -112,6 +115,31 @@ export function Fila() {
     retirar(id);
   }
 
+  /** Colapsa anuncios repetidos que ja estao na fila, ficando com o mais barato. */
+  async function limparDuplicados() {
+    setLimpando(true);
+    setAviso(null);
+    try {
+      const r = await api.post<{
+        antes: number;
+        depois: number;
+        cortadas: number;
+        exemplos: { ficou: string; preco: number; repetidos: number }[];
+      }>('/api/offers/limpar-duplicados');
+      setAviso(
+        r.cortadas === 0
+          ? 'Nenhum produto repetido na fila.'
+          : `${r.cortadas} anúncio(s) repetido(s) saíram da fila — ficou o mais barato de cada produto. Restaram ${r.depois}.` +
+            (r.exemplos.length ? ` Ex.: "${r.exemplos[0].ficou.slice(0, 40)}..." resumiu ${r.exemplos[0].repetidos + 1} anúncios.` : ''),
+      );
+      await load(aba);
+    } catch (err) {
+      setAviso(err instanceof Error ? err.message : 'Não consegui limpar.');
+    } finally {
+      setLimpando(false);
+    }
+  }
+
   async function saveDraft() {
     if (!editing) return;
     const updated = await api.patch<Offer>(`/api/offers/${editing.id}`, { message: draft });
@@ -129,12 +157,18 @@ export function Fila() {
             clicar.
           </p>
         </div>
-        <button className="btn btn--ghost" onClick={() => void load()}>
-          Atualizar
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn--ghost" disabled={limpando} onClick={() => void limparDuplicados()}>
+            {limpando ? 'Limpando...' : 'Limpar repetidos'}
+          </button>
+          <button className="btn btn--ghost" onClick={() => void load(aba)}>
+            Atualizar
+          </button>
+        </div>
       </div>
 
       {error && <div className="notice">{error}</div>}
+      {aviso && <div className="notice" data-tone="warn">{aviso}</div>}
 
       <div className="panel">
         <h2 className="panel__title">Adicionar oferta</h2>

@@ -35,6 +35,10 @@ export const NICHOS_PRONTOS: NichoPronto[] = [
       'para dormir',
       'tv box',
       'smart tv',
+      // "Penteadeira Camarim Escrivaninha em L" passava pelo termo escrivaninha
+      'penteadeira',
+      'camarim',
+      'cabeceira',
     ],
     entries: [
       // --- Prateleiras puras: entram inteiras (46 a 49 de 50 aprovados) ---
@@ -61,6 +65,20 @@ export const NICHOS_PRONTOS: NichoPronto[] = [
         categoryId: 100582, // Caixas de som: as RGB servem, o resto nao
         requireTerms: ['gamer', 'rgb'],
       },
+
+      // --- Nivel 3: recortes que o nivel 2 nao alcanca (ver categorias-n3.ts) ---
+      {
+        categoryId: 101996, // Mousepads: prateleira quase toda de setup
+        requireTerms: [],
+      },
+      {
+        categoryId: 101171, // Cadeiras: junto de cadeira de praia, puff e banquinho
+        requireTerms: ['gamer', 'escritorio', 'giratoria', 'presidente', 'ergonomica'],
+      },
+      {
+        categoryId: 101169, // Mesas: dominada por mesa de cabeceira
+        requireTerms: ['gamer', 'escrivaninha', 'computador', 'notebook'],
+      },
     ],
   },
 ];
@@ -71,8 +89,10 @@ export const NICHOS_PRONTOS: NichoPronto[] = [
  *   100580 Microfones     -> 4 de 50. E microfone de lapela para celular.
  *   101935 Armazenamento  -> 10 de 50. E adaptador USB-C, nao SSD gamer.
  *   101942 Notebooks      -> caros e com pouca venda; nao sustentam grupo.
- *   100713 Moveis         -> 0 de 50. A cadeira gamer nao aparece entre os
- *                            mais vendidos, que sao mesa de cabeceira.
+ *   100713 Moveis         -> 0 de 50 no nivel 2: a cadeira gamer nao aparece
+ *                            entre os mais vendidos, que sao mesa de cabeceira.
+ *                            Resolvido descendo pro nivel 3 (101171 Cadeiras)
+ *                            com termo -- nao re-adicione o 100713.
  *   100719 Iluminacao     -> fita LED entra, mas puxa lampada e luz noturna
  *                            junto; o ganho nao pagou o ruido.
  */

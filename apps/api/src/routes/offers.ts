@@ -6,6 +6,7 @@ import { ingestUrl } from '../services/ingest.js';
 import { sendOffer } from '../services/dispatch.js';
 import { renderMessage } from '../services/message.js';
 import { lowestPrice } from '../services/scoring.js';
+import { agruparSimilares } from '../services/similaridade.js';
 import { connectors, connectorList } from '../connectors/index.js';
 import type { NormalizedProduct } from '../connectors/types.js';
 import { ingestProduct } from '../services/ingest.js';
@@ -91,6 +92,50 @@ export async function offerRoutes(app: FastifyInstance) {
         total: g._count._all,
       }))
       .sort((a, b) => b.total - a.total);
+  });
+
+  /**
+   * Colapsa anuncios repetidos que ja estao na fila, ficando com o mais barato
+   * de cada produto. O resto vai pra SKIPPED -- nao apaga, so tira da frente.
+   *
+   * Existe porque o dedup entrou depois: a fila acumulou seis "Pen Drives
+   * Cruzer" e quatro "Mini Game Retro" antes dele.
+   */
+  app.post<{ Body: { limiar?: number } }>('/api/offers/limpar-duplicados', async (req) => {
+    const { limiar } = z.object({ limiar: z.number().min(0.4).max(1).optional() }).parse(req.body ?? {});
+
+    const pendentes = await prisma.offer.findMany({
+      where: { status: OfferStatus.PENDING },
+      include: { product: true },
+    });
+
+    const grupos = agruparSimilares(
+      pendentes.map((o) => ({ id: o.id, title: o.product.title, price: Number(o.price) })),
+      limiar,
+    );
+
+    const cortar = grupos.flatMap((g) => g.repetidos.map((r) => r.id));
+    if (cortar.length) {
+      await prisma.offer.updateMany({
+        where: { id: { in: cortar } },
+        data: { status: OfferStatus.SKIPPED },
+      });
+    }
+
+    return {
+      ok: true,
+      antes: pendentes.length,
+      depois: pendentes.length - cortar.length,
+      cortadas: cortar.length,
+      exemplos: grupos
+        .filter((g) => g.repetidos.length > 0)
+        .slice(0, 8)
+        .map((g) => ({
+          ficou: g.escolhido.title,
+          preco: g.escolhido.price,
+          repetidos: g.repetidos.length,
+        })),
+    };
   });
 
   /** Modo manual: voce cola o link, o sistema faz o resto. */

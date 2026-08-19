@@ -4,6 +4,7 @@ import { logger } from '../lib/logger.js';
 import { sleep } from '../lib/http.js';
 import { connectors } from '../connectors/index.js';
 import type { NormalizedProduct } from '../connectors/types.js';
+import { agruparSimilares, normalizar } from './similaridade.js';
 
 /**
  * Busca por nicho: varre todas as categorias do recorte e aplica os filtros.
@@ -15,13 +16,7 @@ import type { NormalizedProduct } from '../connectors/types.js';
  * aceitar dentro de cada uma.
  */
 
-/** Tira acento e caixa: "Retrô" e "retro" tem que casar. */
-export function normalizar(texto: string): string {
-  return texto
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
+export { normalizar };
 
 export interface NichoParaBusca {
   platform: Platform;
@@ -39,6 +34,8 @@ export interface AchadoDoNicho {
 export interface BuscaNichoSummary {
   bruto: number;
   aceitos: number;
+  /** Anuncios repetidos do mesmo produto que foram colapsados. */
+  repetidos: number;
   porCategoria: { categoryId: number; bruto: number; aceitos: number; erro?: string }[];
 }
 
@@ -70,13 +67,14 @@ export function passaNoFiltro(
  */
 export async function buscarPorNicho(
   nicho: NichoParaBusca,
-  opcoes: { porCategoria?: number; maxPrice?: number } = {},
+  opcoes: { porCategoria?: number; maxPrice?: number; limiarDedup?: number } = {},
 ): Promise<{ achados: AchadoDoNicho[]; resumo: BuscaNichoSummary }> {
   const connector = connectors[nicho.platform];
   const porCategoria = opcoes.porCategoria ?? 50;
+  const limiarDedup = opcoes.limiarDedup;
 
   const achados: AchadoDoNicho[] = [];
-  const resumo: BuscaNichoSummary = { bruto: 0, aceitos: 0, porCategoria: [] };
+  const resumo: BuscaNichoSummary = { bruto: 0, aceitos: 0, repetidos: 0, porCategoria: [] };
   const jaVisto = new Set<string>();
 
   for (const entry of nicho.entries) {
@@ -108,9 +106,21 @@ export async function buscarPorNicho(
     }
   }
 
+  // Colapsa anuncios do mesmo produto, ficando com o mais barato. Roda depois
+  // de juntar todas as categorias porque o mesmo item aparece em mais de uma.
+  const grupos = agruparSimilares(
+    achados.map((a) => ({ ...a, title: a.produto.title, price: a.produto.price })),
+    limiarDedup,
+  );
+  resumo.repetidos = achados.length - grupos.length;
+  const unicos: AchadoDoNicho[] = grupos.map((g) => ({
+    produto: g.escolhido.produto,
+    categoryId: g.escolhido.categoryId,
+  }));
+
   // Mais vendidos primeiro: e o criterio que o nicho existe para servir.
-  achados.sort((a, b) => (b.produto.soldCount ?? 0) - (a.produto.soldCount ?? 0));
-  return { achados, resumo };
+  unicos.sort((a, b) => (b.produto.soldCount ?? 0) - (a.produto.soldCount ?? 0));
+  return { achados: unicos, resumo };
 }
 
 /** Carrega o nicho do banco no formato que `buscarPorNicho` espera. */
