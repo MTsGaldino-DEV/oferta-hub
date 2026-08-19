@@ -1,13 +1,4 @@
-import { Platform } from '@prisma/client';
-
-const STORE_NAME: Record<Platform, string> = {
-  AMAZON: 'Amazon',
-  MERCADO_LIVRE: 'Mercado Livre',
-  SHOPEE: 'Shopee',
-  ALIEXPRESS: 'AliExpress',
-  AWIN: 'Loja parceira',
-  LOMADEE: 'Loja parceira',
-};
+import type { Platform } from '@prisma/client';
 
 export interface MessageInput {
   platform: Platform;
@@ -15,6 +6,10 @@ export interface MessageInput {
   price: number;
   comparePrice?: number | null;
   discountPct?: number | null;
+  /**
+   * Menor preco do historico. Continua sendo calculado porque a nota da fila
+   * depende dele -- so nao entra mais no texto que vai pro grupo.
+   */
   lowest?: number | null;
   couponCode?: string | null;
   link: string;
@@ -49,10 +44,6 @@ export function renderMessage(input: MessageInput): string {
   const off = input.discountPct ? `  (-${Math.round(input.discountPct)}%)` : '';
   lines.push(`*${brl(input.price)}*${off}`);
 
-  if (input.lowest !== null && input.lowest !== undefined && input.price <= input.lowest) {
-    lines.push('_Menor preco dos ultimos 90 dias._');
-  }
-
   if (input.couponCode) {
     lines.push('');
     lines.push(`Cupom: *${input.couponCode}*`);
@@ -65,7 +56,6 @@ export function renderMessage(input: MessageInput): string {
 
   lines.push('');
   lines.push(input.link);
-  lines.push(`_${STORE_NAME[input.platform]} · link de afiliado_`);
 
   return lines.join('\n');
 }
