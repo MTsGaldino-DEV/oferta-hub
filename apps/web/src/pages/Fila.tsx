@@ -256,7 +256,7 @@ export function Fila() {
           horas.
         </div>
       ) : (
-        <div className="queue">
+        <div className="shelf">
           {offers.map((o) => (
             <PriceTag
               key={o.id}

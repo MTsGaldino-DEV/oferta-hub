@@ -60,5 +60,7 @@ export interface Offer {
     canonicalUrl: string;
     rating: number | null;
     reviewCount: number | null;
+    soldCount: number | null;
+    commissionPct: number | null;
   };
 }

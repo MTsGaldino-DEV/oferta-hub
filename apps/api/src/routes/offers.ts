@@ -45,6 +45,8 @@ const serialize = (o: any) => ({
     canonicalUrl: o.product.canonicalUrl,
     rating: num(o.product.rating),
     reviewCount: o.product.reviewCount,
+    soldCount: o.product.soldCount,
+    commissionPct: num(o.product.commissionPct),
   },
 });
 
