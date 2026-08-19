@@ -200,7 +200,9 @@ export async function offerRoutes(app: FastifyInstance) {
   );
 
   /** Regenerar o texto a partir do template, se voce editou demais e quer voltar. */
-  app.post<{ Params: { id: string }; Body: { note?: string } }>('/api/offers/:id/rebuild', async (req) => {
+  app.post<{ Params: { id: string }; Body: { note?: string; anuncio?: boolean } }>(
+    '/api/offers/:id/rebuild',
+    async (req) => {
     const offer = await prisma.offer.findUniqueOrThrow({
       where: { id: req.params.id },
       include: { product: true, shortLink: true, niche: true },
@@ -215,6 +217,7 @@ export async function offerRoutes(app: FastifyInstance) {
       couponCode: offer.couponCode,
       link: offer.affiliateUrl,
       note: req.body?.note,
+      anuncio: req.body?.anuncio ?? false,
     });
     const updated = await prisma.offer.update({
       where: { id: offer.id },
@@ -222,7 +225,8 @@ export async function offerRoutes(app: FastifyInstance) {
       include: { product: true, shortLink: true, niche: true },
     });
     return serialize(updated);
-  });
+    },
+  );
 
   app.post<{ Params: { id: string }; Body: { groupJid?: string } }>('/api/offers/:id/send', async (req, reply) => {
     try {
