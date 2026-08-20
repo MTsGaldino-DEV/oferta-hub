@@ -21,15 +21,71 @@
 
   const texto = (el) => (el ? (el.textContent || '').trim() : '');
 
-  /** Extrai o codigo MLB de qualquer formato de URL do ML. */
-  function codigoMlb(url) {
-    const s = String(url || '');
-    const m =
-      s.match(/\/p\/(MLB-?\d+)/i) ||
-      s.match(/\/up\/(MLBU?-?\d+)/i) ||
-      s.match(/\/(MLB-?\d+)(?:[-/?#]|$)/i) ||
-      s.match(/(MLB-?\d+)/i);
-    return m ? m[1].toUpperCase().replace('-', '') : null;
+  const BASE_ML = 'https://www.mercadolivre.com.br';
+
+  /**
+   * Resolve uma URL do ML no par (id do item, URL que a API de afiliados aceita).
+   *
+   * Nao basta pegar o href do card. Tres formas de URL quebram a geracao do
+   * link, e foi o que derrubou a primeira captura de busca inteira: 13 de 13
+   * respostas 400.
+   *
+   *  - COMPACTA (www.mercadolivre.com.br/MLB123): a API recusa. Tem de virar
+   *    produto.mercadolivre.com.br/MLB-123-_JM. E a forma que a listagem usa,
+   *    entao sozinha ela explica o lote inteiro falhando.
+   *  - TRACKING (click1.mercadolivre.com.br/mclics/...): o caminho nao descreve
+   *    produto nenhum. So vale se carregar wid= ou item_id= nos parametros -- e
+   *    mesmo assim quem vai para a API e a URL do item, nunca a de tracking,
+   *    que nao atribui comissao.
+   *  - PRODUTO DE VENDEDOR (/up/MLBU123): MLBU e outro namespace, nao um MLB com
+   *    letra sobrando. O MLB de verdade vem no wid= do mesmo link; tirar o "U"
+   *    para "converter" aponta para outro anuncio.
+   */
+  function resolverUrlMl(rawUrl) {
+    if (!rawUrl) return null;
+
+    let u;
+    try {
+      u = new URL(String(rawUrl), BASE_ML);
+    } catch {
+      return null;
+    }
+    if (!/(^|\.)mercadoli(vre|bre)\.com(\.br)?$/i.test(u.hostname)) return null;
+
+    const jm = (digitos) => `https://produto.mercadolivre.com.br/MLB-${digitos}-_JM`;
+
+    let extras = u.search + u.hash;
+    try {
+      extras = decodeURIComponent(extras);
+    } catch {
+      // parametro mal codificado: segue com a forma crua
+    }
+    const wid =
+      extras.match(/[?#&](?:wid|item_id)=(MLB\d{6,})/i) || extras.match(/item_id[:=](MLB\d{6,})/i);
+    const porWid = () => ({ externalId: wid[1].toUpperCase(), url: jm(wid[1].slice(3)) });
+
+    const caminho = u.pathname;
+    if (/^click/i.test(u.hostname) || caminho.includes('/mclics/')) {
+      return wid ? porWid() : null;
+    }
+
+    // Catalogo: /p/MLB123
+    let m = caminho.match(/\/p\/MLB-?(\d{6,})/i);
+    if (m) return { externalId: `MLB${m[1]}`, url: u.href };
+
+    // Produto de vendedor: o wid tem precedencia sobre o id do caminho.
+    m = caminho.match(/\/up\/(MLBU?)-?(\d{6,})/i);
+    if (m) return wid ? porWid() : { externalId: `${m[1].toUpperCase()}${m[2]}`, url: u.href };
+
+    // produto.mercadolivre.com.br/MLB-123-slug-_JM
+    m = caminho.match(/\/MLB-(\d{6,})/i);
+    if (m) return { externalId: `MLB${m[1]}`, url: u.href };
+
+    // Compacta: reescreve, porque a API nao aceita.
+    m = caminho.match(/^\/(MLB)(\d{6,})\/?$/i);
+    if (m) return { externalId: `MLB${m[2]}`, url: jm(m[2]) };
+
+    return wid ? porWid() : null;
   }
 
   /**
@@ -176,15 +232,17 @@
       document.querySelector('.ui-pdp-gallery img');
 
     const canonical = document.querySelector('link[rel="canonical"]');
-    const canonicalUrl = (canonical && canonical.href) || location.href.split('#')[0];
-    const externalId = codigoMlb(canonicalUrl) || codigoMlb(location.href);
-    if (!externalId) return null;
+    // A canonica pode vir relativa, e numa PDP alcancada por clique no card o
+    // MLB real esta no wid= do endereco da barra -- por isso as duas entram.
+    const ref =
+      resolverUrlMl(canonical && canonical.getAttribute('href')) || resolverUrlMl(location.href);
+    if (!ref) return null;
 
     return {
       platform: 'MERCADO_LIVRE',
-      externalId,
+      externalId: ref.externalId,
       title: texto(document.querySelector('h1.ui-pdp-title')) || texto(document.querySelector('h1')),
-      canonicalUrl,
+      canonicalUrl: ref.url,
       imageUrl: (imgEl && (imgEl.getAttribute('data-zoom') || imgEl.src)) || undefined,
       price,
       listPrice: listPrice && price && listPrice > price ? listPrice : undefined,
@@ -217,9 +275,8 @@
 
     for (const card of cards) {
       const link = card.querySelector('a[href*="MLB"], a.poly-component__title, a.ui-search-link');
-      const href = link && link.href;
-      const externalId = codigoMlb(href);
-      if (!externalId) continue;
+      const ref = resolverUrlMl(link && link.getAttribute('href'));
+      if (!ref) continue;
 
       const titulo =
         texto(card.querySelector('.poly-component__title, .ui-search-item__title')) || texto(link);
@@ -230,9 +287,9 @@
 
       achados.push({
         platform: 'MERCADO_LIVRE',
-        externalId,
+        externalId: ref.externalId,
         title: titulo,
-        canonicalUrl: href.split('#')[0],
+        canonicalUrl: ref.url,
         imageUrl: (img && (img.getAttribute('data-src') || img.src)) || undefined,
         price,
         listPrice,
@@ -276,7 +333,13 @@
       const partes = [`${r.criados} na fila`];
       if (r.repetidos) partes.push(`${r.repetidos} já estavam`);
       if (r.semLink) partes.push(`${r.semLink} sem link de afiliado`);
-      avisar(`Hub Ofertas: ${partes.join(', ')}.`, 'ok');
+      // O motivo da falha vai para o console inteiro: no aviso nao cabe, e sem
+      // ele so sobra o status HTTP, que nao diz nada.
+      if (r.avisoLink) console.warn('[Hub Ofertas] link de afiliado:', r.avisoLink);
+      avisar(
+        `Hub Ofertas: ${partes.join(', ')}.${r.avisoLink ? ' Veja o console para o motivo.' : ''}`,
+        r.semLink ? 'erro' : 'ok',
+      );
     } catch (e) {
       avisar(`Hub Ofertas: ${e.message}`, 'erro');
     } finally {

@@ -52,6 +52,12 @@ function gerarLinkNaPagina(urls, base, api) {
     const tagId = tags[0].id || tags[0];
 
     const links = {};
+    // Primeira falha do lote, com o corpo da resposta. Um lote inteiro caiu com
+    // 400 e o codigo so fazia `continue` -- sobrava o status no console e
+    // nenhuma pista do motivo. Guardar o texto e o que transforma "deu 400" em
+    // "a API recusa a URL compacta".
+    let falha = null;
+
     for (const url of urls) {
       try {
         const res = await fetch(`${base}${api}/links`, {
@@ -60,18 +66,25 @@ function gerarLinkNaPagina(urls, base, api) {
           headers,
           body: JSON.stringify({ url, tag_id: tagId }),
         });
-        if (!res.ok) continue;
+        if (!res.ok) {
+          if (!falha) {
+            const corpo = await res.text().catch(() => '');
+            falha = `${res.status} em ${url} -> ${corpo.slice(0, 300) || '(sem corpo)'}`;
+          }
+          continue;
+        }
         const dados = await res.json();
         const curto = dados.short_url || dados.short_link || dados.url || null;
         // So vale meli.la. Qualquer outra coisa (redirect, URL do produto) nao
         // carrega atribuicao, e mandar ela seria pior que nao mandar link.
         if (curto && curto.startsWith('https://meli.la/')) links[url] = curto;
-      } catch {
-        // link individual pode falhar; o resto do lote continua
+        else if (!falha) falha = `resposta sem meli.la em ${url}: ${JSON.stringify(dados).slice(0, 300)}`;
+      } catch (e) {
+        if (!falha) falha = `${e.message} em ${url}`;
       }
       await new Promise((r) => setTimeout(r, 300)); // nao martelar o painel
     }
-    return { links };
+    return { links, erro: falha };
   })();
 }
 
