@@ -63,6 +63,69 @@
   }
 
   // ------------------------------------------------------------------
+  // preco: escolher por PAPEL, nunca pelo tamanho do numero
+  // ------------------------------------------------------------------
+
+  /**
+   * Blocos de dinheiro que NAO sao o preco do produto.
+   *
+   * O erro mais caro da vitrine e a parcela. Num controle de R$ 406,43 em
+   * "12x R$ 39,30", pegar o menor numero do card anuncia R$ 39,30 e 94% OFF --
+   * preco mentiroso no grupo, e o grupo e o ativo que nao da pra reconstruir.
+   * Frete e "ou R$ 47,90 em outros meios" entram na mesma lista.
+   */
+  const RUIDO_DE_PRECO = [
+    '.poly-price__installments',
+    '.ui-search-installments',
+    '.ui-search-item__group--installments',
+    '.ui-pdp-price__subtitles',
+    '.poly-component__shipping',
+    '.ui-search-item__shipping',
+    '.poly-price__other-payment',
+    '.ui-search-price__other-payment',
+  ].join(', ');
+
+  /**
+   * Parcela sem classe conhecida. As classes do ML mudam sem aviso, entao a
+   * forma tambem conta: o container da parcela comeca com "12x".
+   */
+  function pareceParcela(el) {
+    let no = el.parentElement;
+    for (let i = 0; i < 3 && no; i++, no = no.parentElement) {
+      if (/^\s*\d{1,2}\s*x\b/i.test(no.textContent || '')) return true;
+    }
+    return false;
+  }
+
+  const ehRiscado = (el) =>
+    el.matches('s, del, .andes-money-amount--previous') || !!el.closest('s, del');
+
+  /**
+   * Preco atual e preco cheio, de um card ou de uma pagina de produto.
+   *
+   * Nao usa min/max sobre os numeros da caixa -- foi assim que a parcela virou
+   * preco. Separa por papel: riscado e o cheio, e o primeiro nao-riscado que
+   * sobra depois do ruido e o atual.
+   */
+  function lerPrecos(raiz) {
+    if (!raiz) return {};
+
+    const blocos = [...raiz.querySelectorAll('.andes-money-amount')].filter(
+      (el) => !el.closest(RUIDO_DE_PRECO) && !pareceParcela(el),
+    );
+
+    const price = lerDinheiro(blocos.find((el) => !ehRiscado(el)));
+    const listPrice = lerDinheiro(blocos.find(ehRiscado));
+
+    return {
+      price: price || undefined,
+      // So conta como "de" se for maior: vendedor as vezes repete o mesmo
+      // numero nos dois campos, e isso viraria um desconto de 0%.
+      listPrice: listPrice && price && listPrice > price ? listPrice : undefined,
+    };
+  }
+
+  // ------------------------------------------------------------------
   // pagina do produto (PDP)
   // ------------------------------------------------------------------
 
@@ -90,18 +153,15 @@
     const raiz = raizDoPreco();
     if (!raiz) return null;
 
-    // O preco atual mora na "segunda linha"; o riscado fica fora dela.
-    const escopoAtual = raiz.querySelector('.ui-pdp-price__second-line') || raiz;
-    let price = lerDinheiro(escopoAtual);
+    const { price: lido, listPrice } = lerPrecos(raiz);
+    let price = lido;
     if (!price) {
-      const meta = escopoAtual.querySelector('meta[itemprop="price"]');
+      const meta =
+        raiz.querySelector('meta[itemprop="price"]') ||
+        document.querySelector('meta[itemprop="price"]');
       const v = meta && parseFloat(meta.getAttribute('content'));
       if (Number.isFinite(v) && v > 0) price = v;
     }
-
-    const listPrice = lerDinheiro(
-      raiz.querySelector('.ui-pdp-price__original-value, .andes-money-amount--previous'),
-    );
 
     const subtitulos = [...document.querySelectorAll('.ui-pdp-subtitle, .ui-pdp-header__subtitle')]
       .flatMap((el) => [texto(el), el.getAttribute('aria-label') || ''])
@@ -126,9 +186,7 @@
       title: texto(document.querySelector('h1.ui-pdp-title')) || texto(document.querySelector('h1')),
       canonicalUrl,
       imageUrl: (imgEl && (imgEl.getAttribute('data-zoom') || imgEl.src)) || undefined,
-      price: price || undefined,
-      // So conta como "de" se for maior: vendedor as vezes repete o mesmo
-      // numero nos dois campos, e isso viraria um desconto de 0%.
+      price,
       listPrice: listPrice && price && listPrice > price ? listPrice : undefined,
       soldCount: lerVendidos(subtitulos),
       rating: Number.isFinite(nota) && nota > 0 && nota <= 5 ? nota : undefined,
@@ -167,14 +225,7 @@
         texto(card.querySelector('.poly-component__title, .ui-search-item__title')) || texto(link);
       if (!titulo) continue;
 
-      // No card o riscado tambem aparece antes; pegamos os dois blocos na ordem
-      // e assumimos que o maior e o preco cheio.
-      const blocos = [...card.querySelectorAll('.andes-money-amount')]
-        .map(lerDinheiro)
-        .filter((v) => v && v > 0);
-      const price = blocos.length ? Math.min(...blocos) : undefined;
-      const listPrice = blocos.length > 1 ? Math.max(...blocos) : undefined;
-
+      const { price, listPrice } = lerPrecos(card);
       const img = card.querySelector('img');
 
       achados.push({
@@ -184,7 +235,7 @@
         canonicalUrl: href.split('#')[0],
         imageUrl: (img && (img.getAttribute('data-src') || img.src)) || undefined,
         price,
-        listPrice: listPrice && price && listPrice > price ? listPrice : undefined,
+        listPrice,
         soldCount: lerVendidos(texto(card)),
         origem: 'listagem',
       });
