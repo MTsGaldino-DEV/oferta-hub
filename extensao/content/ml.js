@@ -26,20 +26,26 @@
   /**
    * Resolve uma URL do ML no par (id do item, URL que a API de afiliados aceita).
    *
-   * Nao basta pegar o href do card. Tres formas de URL quebram a geracao do
-   * link, e foi o que derrubou a primeira captura de busca inteira: 13 de 13
-   * respostas 400.
+   * Nao basta pegar o href do card e nao basta so reconhecer a forma. A URL de
+   * um card de busca chega assim:
+   *   .../p/MLB67503176?matt_word=x#polycard_client=search_best-seller&
+   *   tracking_id=...&wid=MLB.../sid=search
+   * A forma "/p/MLB<id>" e aceita pela API -- mas so se for so ela. Mandar essa
+   * URL inteira, com o fragmento de tracking da busca junto, voltava 400 mesmo
+   * sendo uma forma "aceita": foi o que fez toda captura vinda de busca cair no
+   * link matt_tool de reserva, enquanto uma PDP aberta direto (cuja canonica ja
+   * vem limpa) funcionava. A solucao nao e aceitar mais formas -- e nunca
+   * repassar query nem fragmento adiante: todo id numerico de item, de onde
+   * quer que venha, vira a mesma URL limpa reconstruida do zero.
    *
-   *  - COMPACTA (www.mercadolivre.com.br/MLB123): a API recusa. Tem de virar
-   *    produto.mercadolivre.com.br/MLB-123-_JM. E a forma que a listagem usa,
-   *    entao sozinha ela explica o lote inteiro falhando.
    *  - TRACKING (click1.mercadolivre.com.br/mclics/...): o caminho nao descreve
    *    produto nenhum. So vale se carregar wid= ou item_id= nos parametros -- e
-   *    mesmo assim quem vai para a API e a URL do item, nunca a de tracking,
-   *    que nao atribui comissao.
+   *    mesmo assim quem vai para a API e a URL limpa do item, nunca a de
+   *    tracking, que nao atribui comissao.
    *  - PRODUTO DE VENDEDOR (/up/MLBU123): MLBU e outro namespace, nao um MLB com
    *    letra sobrando. O MLB de verdade vem no wid= do mesmo link; tirar o "U"
-   *    para "converter" aponta para outro anuncio.
+   *    para "converter" aponta para outro anuncio. Sem wid, so da pra limpar
+   *    query e fragmento -- o path continua sendo /up/, que a API aceita.
    */
   function resolverUrlMl(rawUrl) {
     if (!rawUrl) return null;
@@ -69,21 +75,20 @@
       return wid ? porWid() : null;
     }
 
-    // Catalogo: /p/MLB123
-    let m = caminho.match(/\/p\/MLB-?(\d{6,})/i);
-    if (m) return { externalId: `MLB${m[1]}`, url: u.href };
+    // Qualquer forma que exponha o id numerico do item -- catalogo /p/MLB123,
+    // PDP /MLB-123-slug-_JM, ou compacta /MLB123 -- normaliza para a mesma URL
+    // limpa. O {6,} tambem e o que evita casar "bone-mlb-9forty": o "9" sozinho
+    // nunca chega a seis digitos.
+    let m = caminho.match(/\/MLB-?(\d{6,})/i);
+    if (m) return { externalId: `MLB${m[1]}`, url: jm(m[1]) };
 
-    // Produto de vendedor: o wid tem precedencia sobre o id do caminho.
+    // Produto de vendedor: o wid tem precedencia sobre o id do caminho, porque
+    // MLBU nao serve para a API. Sem wid, ao menos tira query e fragmento.
     m = caminho.match(/\/up\/(MLBU?)-?(\d{6,})/i);
-    if (m) return wid ? porWid() : { externalId: `${m[1].toUpperCase()}${m[2]}`, url: u.href };
-
-    // produto.mercadolivre.com.br/MLB-123-slug-_JM
-    m = caminho.match(/\/MLB-(\d{6,})/i);
-    if (m) return { externalId: `MLB${m[1]}`, url: u.href };
-
-    // Compacta: reescreve, porque a API nao aceita.
-    m = caminho.match(/^\/(MLB)(\d{6,})\/?$/i);
-    if (m) return { externalId: `MLB${m[2]}`, url: jm(m[2]) };
+    if (m) {
+      if (wid) return porWid();
+      return { externalId: `${m[1].toUpperCase()}${m[2]}`, url: `${u.origin}${u.pathname}` };
+    }
 
     return wid ? porWid() : null;
   }
