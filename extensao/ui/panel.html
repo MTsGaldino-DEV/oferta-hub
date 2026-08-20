@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="panel.css" />
+
+<header class="topo">
+  <div class="marca">Hub<span>Ofertas</span></div>
+  <span id="ligacao" class="ligacao" data-tom="">·</span>
+</header>
+
+<section id="fora-do-ml" class="aviso-vazio" hidden>
+  Abra um produto ou uma busca do Mercado Livre nesta aba para capturar.
+</section>
+
+<section id="sem-content-script" class="aviso-vazio" hidden>
+  A extensão foi atualizada. Recarregue a página (F5) para ativar a captura aqui.
+</section>
+
+<section id="area-captura" class="captura" hidden>
+  <div class="captura__barra">
+    <span id="origem-atual" class="origem"></span>
+    <button id="atualizar" class="btn-texto" title="Ler a página de novo">Atualizar</button>
+  </div>
+
+  <div id="lista" class="lista"></div>
+
+  <div class="captura__rodape">
+    <label class="marcar-todos">
+      <input id="marcar-todos" type="checkbox" />
+      <span id="contagem">0 selecionados</span>
+    </label>
+    <button id="enviar" class="btn-principal" disabled>Enviar ao Hub</button>
+  </div>
+
+  <p id="resultado" class="resultado"></p>
+</section>
+
+<details class="config">
+  <summary>Conexão com o app</summary>
+  <label for="api">Endereço do app</label>
+  <input id="api" placeholder="http://localhost:3333" />
+
+  <label for="token">Token</label>
+  <input id="token" type="password" placeholder="cole o token de Conexões" />
+
+  <button id="salvar" class="btn-secundario">Salvar e testar</button>
+  <p id="estado-config"></p>
+</details>
+
+<script src="panel.js" type="module"></script>

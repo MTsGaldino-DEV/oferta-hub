@@ -3,7 +3,7 @@
   "name": "Hub Ofertas",
   "version": "1.0.0",
   "description": "Captura produtos do Mercado Livre e gera o link de afiliado meli.la direto para o seu Hub Ofertas.",
-  "permissions": ["activeTab", "scripting", "storage"],
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "tabs"],
   "host_permissions": [
     "https://*.mercadolivre.com.br/*",
     "https://*.mercadolibre.com/*",
@@ -19,5 +19,6 @@
       "run_at": "document_idle"
     }
   ],
-  "action": { "default_popup": "ui/popup.html", "default_title": "Hub Ofertas" }
+  "side_panel": { "default_path": "ui/panel.html" },
+  "action": { "default_title": "Hub Ofertas" }
 }

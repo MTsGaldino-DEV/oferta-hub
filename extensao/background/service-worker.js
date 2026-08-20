@@ -12,6 +12,9 @@
 const ML = 'https://www.mercadolivre.com.br';
 const API_AFILIADOS = '/affiliate-program/api/v2/stripe/user';
 
+// Clique no icone abre o painel lateral, no lugar do popup pequeno de antes.
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+
 const PADRAO = { apiUrl: 'http://localhost:3333', token: '' };
 
 async function config() {
