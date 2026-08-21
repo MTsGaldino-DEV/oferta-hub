@@ -2,18 +2,20 @@ import fs from 'node:fs/promises';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
   DisconnectReason,
+  prepareWAMessageMedia,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   type WASocket,
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
-import sharp from 'sharp';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
 
 /**
- * Baixa a foto do produto e devolve uma miniatura JPEG pro card de preview.
+ * Sobe a foto do produto pros servidores do WhatsApp e devolve os campos de
+ * "high quality thumbnail" que fazem o card de preview aparecer GRANDE (foto
+ * no topo, como o card de referencia) em vez do icone pequeno e quadrado.
  *
  * Existe porque o mecanismo automatico do Baileys (`generateHighQualityLinkPreview`)
  * nao funciona com link de afiliado: o `handleRedirects` dele SO segue redirect
@@ -24,21 +26,29 @@ import { logger } from '../lib/logger.js';
  * ML tem, e mesmo assim o redirect nunca era seguido. Por isso o card saia em
  * branco nas duas plataformas.
  *
- * A saida: montar o preview a mao, com a foto que a gente ja tem salva.
+ * A saida: montar o preview a mao, com a foto que a gente ja tem salva -- pelo
+ * MESMO caminho que o Baileys usa quando a geracao automatica funciona
+ * (`prepareWAMessageMedia` com `mediaTypeOverride: 'thumbnail-link'`, so que
+ * apontando pra URL da nossa foto em vez da que ele tentaria (e falharia) raspar.
+ * So passar o `jpegThumbnail` (miniatura embutida, base64) faz o WhatsApp cair
+ * no layout compacto -- foi o que aconteceu no grupo real: card pequeno, sem a
+ * foto grande. O card grande exige a imagem de verdade hospedada no servidor do
+ * WhatsApp (`thumbnailDirectPath`/`mediaKey`), que so existe depois desse upload.
  */
-async function gerarThumbnail(url: string): Promise<Buffer | undefined> {
+async function gerarPreviewImagem(sock: WASocket, url: string): Promise<Record<string, unknown>> {
   try {
-    const controle = new AbortController();
-    const corte = setTimeout(() => controle.abort(), 5000);
-    const res = await fetch(url, { signal: controle.signal });
-    clearTimeout(corte);
-    if (!res.ok) return undefined;
-
-    const bruto = Buffer.from(await res.arrayBuffer());
-    return await sharp(bruto).resize({ width: 192 }).jpeg({ quality: 70 }).toBuffer();
+    const { imageMessage } = await prepareWAMessageMedia(
+      { image: { url } },
+      { upload: sock.waUploadToServer, mediaTypeOverride: 'thumbnail-link' },
+    );
+    if (!imageMessage) return {};
+    return {
+      jpegThumbnail: imageMessage.jpegThumbnail,
+      highQualityThumbnail: imageMessage,
+    };
   } catch (err) {
-    logger.warn({ url, err: String(err) }, 'nao consegui gerar miniatura do link');
-    return undefined;
+    logger.warn({ url, err: String(err) }, 'nao consegui gerar preview grande do link, seguindo sem foto');
+    return {};
   }
 }
 
@@ -246,13 +256,18 @@ class WhatsAppService {
 
     // Passar `linkPreview` explicito -- mesmo sem thumbnail -- e o que faz o
     // Baileys pular a tentativa automatica dele, que sempre falha aqui (ver
-    // gerarThumbnail). undefined so quando preview nem foi passado.
+    // gerarPreviewImagem). undefined so quando preview nem foi passado.
+    //
+    // `title` fica vazio de proposito: o titulo do produto ja e a primeira
+    // linha do texto da mensagem (ver renderMessage em services/message.ts) --
+    // repetir no card so duplica. O card deve mostrar so a foto + dominio,
+    // como no grupo de referencia.
     const linkPreview = preview
       ? {
           'canonical-url': preview.link,
           'matched-text': preview.link,
-          title: preview.title,
-          jpegThumbnail: preview.imageUrl ? await gerarThumbnail(preview.imageUrl) : undefined,
+          title: '',
+          ...(preview.imageUrl ? await gerarPreviewImagem(this.sock, preview.imageUrl) : {}),
         }
       : undefined;
 
