@@ -291,7 +291,7 @@ export function Automacoes() {
                 value={rascunho.intervalMinutes}
                 onChange={(e) => setRascunho((r) => ({ ...r, intervalMinutes: Number(e.target.value) || 0 }))}
               />
-              <small>tempo mínimo entre uma rodada e a próxima</small>
+              <small>tempo mínimo entre uma rodada e a próxima — mínimo 5</small>
             </div>
             <div className="field" style={{ flex: '0 1 140px' }}>
               <label htmlFor="lote">Produtos por rodada</label>
