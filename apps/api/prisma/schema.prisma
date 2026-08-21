@@ -243,11 +243,54 @@ model Niche {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  entries NicheCategory[]
-  rules   DiscoveryRule[]
-  offers  Offer[]
+  entries     NicheCategory[]
+  rules       DiscoveryRule[]
+  offers      Offer[]
+  automations AutomationRule[]
 
   @@unique([platform, name])
+}
+
+/// Regra de envio automatico: escolhe as melhores ofertas pendentes sozinha e
+/// manda pro grupo, sem passar pela sua curadoria. E o oposto do resto do
+/// app -- por isso fica desligada por padrao (active=false ao criar) e o
+/// disparo continua passando pelas mesmas grades de seguranca do envio manual
+/// (teto diario e intervalo minimo em whatsapp/baileys.ts).
+model AutomationRule {
+  id     String  @id @default(cuid())
+  name   String
+  active Boolean @default(false)
+
+  /// 0=domingo .. 6=sabado. So dispara nesses dias.
+  weekdays Int[]
+  /// Janela do dia em que pode disparar, "HH:mm" no fuso do container
+  /// (America/Sao_Paulo).
+  windowStart String @default("09:00")
+  windowEnd   String @default("21:00")
+  /// Espaco minimo entre uma rodada e a proxima.
+  intervalMinutes Int @default(180)
+
+  /// Nulo = qualquer nicho, melhor nota primeiro.
+  nicheId String?
+  /// Quantas ofertas manda por rodada.
+  batchSize Int @default(1)
+  /// Nao manda o mesmo produto de novo antes de X horas, mesmo que a regra
+  /// rode de novo antes disso.
+  cooldownHours Int @default(72)
+
+  /// Grupos de destino. Mais de um = rodizio: uma rodada por grupo, na ordem.
+  groupJids String[]
+  /// Quantas rodadas essa regra ja fez -- e o que decide de qual grupo e a
+  /// vez, em groupJids[runsCount % groupJids.length].
+  runsCount Int @default(0)
+
+  lastRunAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  niche Niche? @relation(fields: [nicheId], references: [id], onDelete: SetNull)
+
+  @@index([active])
 }
 
 /// Uma categoria dentro de um nicho.

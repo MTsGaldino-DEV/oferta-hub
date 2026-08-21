@@ -606,9 +606,20 @@ textarea {
   color: var(--muted);
 }
 
+/* botao vestido de chip -- dias da semana e grupos no formulario de automacao */
+button.chip {
+  appearance: none;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .chip[data-tone='on'] {
   border-color: var(--gain);
   color: var(--gain);
+  background: color-mix(in srgb, var(--gain) 10%, transparent);
 }
 
 .chip[data-tone='off'] {

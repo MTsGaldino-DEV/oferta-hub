@@ -11,6 +11,7 @@ import { seedCategoriasN3 } from '../connectors/categorias-n3.js';
 import { buscarPorNicho, carregarNicho } from '../services/nichos.js';
 import { ingestProduct, upsertProduct } from '../services/ingest.js';
 import { sendOffer } from '../services/dispatch.js';
+import { runAutomacoes } from '../services/automacoes.js';
 
 /**
  * Resumo do que uma rodada fez. Existe porque disparo manual sem retorno e
@@ -283,6 +284,7 @@ export async function seedNichosProntos(): Promise<number> {
 export function startWorkers() {
   const tz = 'America/Sao_Paulo';
   cron.schedule('*/1 * * * *', () => void runScheduler(), { timezone: tz });
+  cron.schedule('*/5 * * * *', () => void runAutomacoes(), { timezone: tz });
   cron.schedule('7 * * * *', () => void runPriceMonitor(), { timezone: tz });
   cron.schedule('23 */3 * * *', () => void runDiscovery(), { timezone: tz });
   cron.schedule('40 6,18 * * *', () => void runConversionSync(), { timezone: tz });

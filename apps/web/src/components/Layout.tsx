@@ -9,6 +9,7 @@ const LINKS = [
   { to: '/nichos', label: 'Nichos' },
   { to: '/produtos', label: 'Preços vigiados' },
   { to: '/agenda', label: 'Agenda' },
+  { to: '/automacoes', label: 'Automações' },
   { to: '/conexoes', label: 'Conexões' },
 ];
 

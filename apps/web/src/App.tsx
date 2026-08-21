@@ -8,6 +8,7 @@ import { Desempenho } from './pages/Desempenho.js';
 import { Nichos } from './pages/Nichos.js';
 import { Produtos } from './pages/Produtos.js';
 import { Agenda } from './pages/Agenda.js';
+import { Automacoes } from './pages/Automacoes.js';
 import { Conexoes } from './pages/Conexoes.js';
 
 function Login({ onIn }: { onIn: () => void }) {
@@ -82,6 +83,7 @@ export default function App() {
         <Route path="/produtos" element={<Produtos />} />
         <Route path="/nichos" element={<Nichos />} />
         <Route path="/agenda" element={<Agenda />} />
+        <Route path="/automacoes" element={<Automacoes />} />
         <Route path="/conexoes" element={<Conexoes />} />
       </Routes>
     </Layout>

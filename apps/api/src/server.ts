@@ -5,6 +5,7 @@ import { env } from './env.js';
 import { prisma } from './db.js';
 import { logger } from './lib/logger.js';
 import { authRoutes, requireAuth } from './plugins/auth.js';
+import { automacaoRoutes } from './routes/automacoes.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
 import { nichoRoutes } from './routes/nichos.js';
@@ -48,6 +49,7 @@ await app.register(extensaoRoutes);
 // Tudo abaixo exige sessao.
 await app.register(async (instance) => {
   instance.addHook('onRequest', requireAuth);
+  await instance.register(automacaoRoutes);
   await instance.register(credentialRoutes);
   await instance.register(extensaoAdminRoutes);
   await instance.register(nichoRoutes);
