@@ -24,7 +24,11 @@ export async function sendOffer(offerId: string, groupJid?: string) {
   const jid = groupJid ?? offer.groupJid ?? (await defaultGroupJid());
 
   try {
-    await whatsapp.sendOffer(jid, offer.message, offer.product.imageUrl);
+    await whatsapp.sendOffer(jid, offer.message, {
+      title: offer.product.title,
+      link: offer.affiliateUrl,
+      imageUrl: offer.product.imageUrl,
+    });
     logger.info({ offerId, jid }, 'oferta enviada');
     return prisma.offer.update({
       where: { id: offerId },

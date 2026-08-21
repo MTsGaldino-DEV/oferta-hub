@@ -20,10 +20,12 @@
     "@whiskeysockets/baileys": "^6.7.9",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
+    "link-preview-js": "^3.2.0",
     "node-cron": "^3.0.3",
     "pino": "^9.4.0",
     "pino-pretty": "^11.2.2",
     "qrcode": "^1.5.4",
+    "sharp": "^0.35.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {

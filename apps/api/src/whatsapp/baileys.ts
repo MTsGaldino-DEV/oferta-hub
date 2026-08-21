@@ -7,9 +7,40 @@ import makeWASocket, {
   type WASocket,
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
+import sharp from 'sharp';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
+
+/**
+ * Baixa a foto do produto e devolve uma miniatura JPEG pro card de preview.
+ *
+ * Existe porque o mecanismo automatico do Baileys (`generateHighQualityLinkPreview`)
+ * nao funciona com link de afiliado: o `handleRedirects` dele SO segue redirect
+ * pro MESMO hostname (ou www. do mesmo) -- e todo link de afiliado redireciona
+ * pra um dominio diferente (meli.la -> mercadolivre.com.br, s.shopee.com.br ->
+ * shopee.com.br). Confirmado direto no codigo do pacote instalado. A pagina do
+ * Shopee no fim da cadeia nem tem tag og:image (e um shell client-side) -- so
+ * ML tem, e mesmo assim o redirect nunca era seguido. Por isso o card saia em
+ * branco nas duas plataformas.
+ *
+ * A saida: montar o preview a mao, com a foto que a gente ja tem salva.
+ */
+async function gerarThumbnail(url: string): Promise<Buffer | undefined> {
+  try {
+    const controle = new AbortController();
+    const corte = setTimeout(() => controle.abort(), 5000);
+    const res = await fetch(url, { signal: controle.signal });
+    clearTimeout(corte);
+    if (!res.ok) return undefined;
+
+    const bruto = Buffer.from(await res.arrayBuffer());
+    return await sharp(bruto).resize({ width: 192 }).jpeg({ quality: 70 }).toBuffer();
+  } catch (err) {
+    logger.warn({ url, err: String(err) }, 'nao consegui gerar miniatura do link');
+    return undefined;
+  }
+}
 
 /**
  * =====================================================================
@@ -182,7 +213,24 @@ class WhatsAppService {
     }
   }
 
-  async sendOffer(jid: string, text: string, imageUrl?: string | null): Promise<string> {
+  /**
+   * Manda so texto, com um card de preview montado a mao (foto, titulo) em
+   * vez de anexar a imagem como midia.
+   *
+   * Era `{ image: { url }, caption }`. O problema: imagem anexada baixa pra
+   * galeria de todo mundo do grupo por padrao (auto-download do WhatsApp), e
+   * um grupo ativo enche o armazenamento de quem participa ate a pessoa sair.
+   * Card de preview nao e midia -- fica preso na bolha do texto, ninguem
+   * baixa nada.
+   *
+   * `preview` e opcional so pra nao quebrar quem manda texto sem produto
+   * associado; toda oferta de verdade tem foto e vai com ela.
+   */
+  async sendOffer(
+    jid: string,
+    text: string,
+    preview?: { title: string; link: string; imageUrl?: string | null },
+  ): Promise<string> {
     if (!this.sock || this.status !== 'connected') {
       throw new Error('WhatsApp desconectado. Pareie o numero em Conexoes.');
     }
@@ -196,9 +244,19 @@ class WhatsAppService {
     await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1800));
     await this.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
 
-    const sent = imageUrl
-      ? await this.sock.sendMessage(jid, { image: { url: imageUrl }, caption: text })
-      : await this.sock.sendMessage(jid, { text, linkPreview: null } as any);
+    // Passar `linkPreview` explicito -- mesmo sem thumbnail -- e o que faz o
+    // Baileys pular a tentativa automatica dele, que sempre falha aqui (ver
+    // gerarThumbnail). undefined so quando preview nem foi passado.
+    const linkPreview = preview
+      ? {
+          'canonical-url': preview.link,
+          'matched-text': preview.link,
+          title: preview.title,
+          jpegThumbnail: preview.imageUrl ? await gerarThumbnail(preview.imageUrl) : undefined,
+        }
+      : undefined;
+
+    const sent = await this.sock.sendMessage(jid, { text, linkPreview });
 
     this.lastSentAt = Date.now();
     await prisma.sendLog.update({ where: { day }, data: { count: { increment: 1 } } });
