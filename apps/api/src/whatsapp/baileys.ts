@@ -258,15 +258,17 @@ class WhatsAppService {
     // Baileys pular a tentativa automatica dele, que sempre falha aqui (ver
     // gerarPreviewImagem). undefined so quando preview nem foi passado.
     //
-    // `title` fica vazio de proposito: o titulo do produto ja e a primeira
-    // linha do texto da mensagem (ver renderMessage em services/message.ts) --
-    // repetir no card so duplica. O card deve mostrar so a foto + dominio,
-    // como no grupo de referencia.
+    // `title` fica um espaco (nao string vazia) de proposito: o titulo do
+    // produto ja e a primeira linha do texto da mensagem (ver renderMessage em
+    // services/message.ts) -- repetir no card so duplica. Testado com string
+    // vazia primeiro e o WhatsApp descarta o card inteiro (nem a foto aparece)
+    // quando title === ''; com um espaco em branco o card renderiza normal e
+    // o titulo fica invisivel, que e o efeito que queremos.
     const linkPreview = preview
       ? {
           'canonical-url': preview.link,
           'matched-text': preview.link,
-          title: '',
+          title: ' ',
           ...(preview.imageUrl ? await gerarPreviewImagem(this.sock, preview.imageUrl) : {}),
         }
       : undefined;
