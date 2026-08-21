@@ -1,6 +1,7 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
+import { ZodError } from 'zod';
 import { env } from './env.js';
 import { prisma } from './db.js';
 import { logger } from './lib/logger.js';
@@ -18,6 +19,25 @@ import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './
 import { whatsapp } from './whatsapp/baileys.js';
 
 const app = Fastify({ logger: false, trustProxy: true });
+
+// Precisa vir ANTES de qualquer plugin/rota: o Fastify amarra o handler de
+// erro a cada rota no momento em que ela e registrada, nao dinamicamente --
+// declarado depois (como estava), nenhuma rota do app usava esse handler, e
+// todo erro sempre caia no formato cru do Fastify (500, corpo com o dump
+// interno do Zod ou do Prisma). Confirmado isolando com uma rota que so
+// lanca erro: so passou a cair aqui depois de mover para cima do register().
+app.setErrorHandler((error, _req, reply) => {
+  if (error instanceof ZodError) {
+    const primeira = error.issues[0];
+    const campo = primeira?.path.join('.');
+    const msg = campo ? `${campo}: ${primeira.message}` : primeira?.message ?? 'Dados invalidos.';
+    return reply.code(400).send({ error: msg });
+  }
+
+  logger.error({ err: error.message, stack: error.stack }, 'erro na requisicao');
+  const status = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500;
+  reply.code(status).send({ error: status === 500 ? 'Algo quebrou no servidor. Veja os logs.' : error.message });
+});
 
 await app.register(cookie);
 await app.register(cors, {
@@ -64,12 +84,6 @@ await app.register(async (instance) => {
   instance.post('/api/jobs/price-monitor', async () => ({ ok: true, ...(await runPriceMonitor()) }));
   instance.post('/api/jobs/discovery', async () => ({ ok: true, ...(await runDiscovery()) }));
   instance.post('/api/jobs/category-sync', async () => ({ ok: true, ...(await runCategorySync()) }));
-});
-
-app.setErrorHandler((error, _req, reply) => {
-  logger.error({ err: error.message, stack: error.stack }, 'erro na requisicao');
-  const status = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500;
-  reply.code(status).send({ error: status === 500 ? 'Algo quebrou no servidor. Veja os logs.' : error.message });
 });
 
 async function main() {

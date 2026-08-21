@@ -120,6 +120,9 @@ export function Automacoes() {
   }
 
   async function salvar() {
+    if (!rascunho.weekdays.length) return setErro('Escolha ao menos um dia da semana.');
+    if (!rascunho.groupJids.length) return setErro('Escolha ao menos um grupo de destino.');
+
     setBusy(true);
     setErro(null);
     try {
