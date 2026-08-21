@@ -36,6 +36,7 @@ export function Fila() {
   const [searching, setSearching] = useState(false);
 
   const [limpando, setLimpando] = useState(false);
+  const [limpandoFila, setLimpandoFila] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
 
   const [editing, setEditing] = useState<Offer | null>(null);
@@ -140,6 +141,25 @@ export function Fila() {
     }
   }
 
+  /** Manda pra SKIPPED tudo que esta pendente na aba aberta -- ou a fila toda, na aba "Todos". */
+  async function limparFila() {
+    const nomeAba = aba ? abas.find((a) => a.nicheId === aba)?.nome ?? 'este nicho' : 'toda a fila';
+    if (!offers.length) return;
+    if (!confirm(`Pular ${offers.length} oferta(s) de ${nomeAba}? Não volta pra fila sozinha.`)) return;
+
+    setLimpandoFila(true);
+    setAviso(null);
+    try {
+      const r = await api.post<{ removidas: number }>('/api/offers/limpar-fila', aba ? { nicheId: aba } : {});
+      setAviso(`${r.removidas} oferta(s) saíram da fila.`);
+      await load(aba);
+    } catch (err) {
+      setAviso(err instanceof Error ? err.message : 'Não consegui limpar a fila.');
+    } finally {
+      setLimpandoFila(false);
+    }
+  }
+
   async function saveDraft() {
     if (!editing) return;
     const updated = await api.patch<Offer>(`/api/offers/${editing.id}`, { message: draft });
@@ -160,6 +180,13 @@ export function Fila() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn--ghost" disabled={limpando} onClick={() => void limparDuplicados()}>
             {limpando ? 'Limpando...' : 'Limpar repetidos'}
+          </button>
+          <button
+            className="btn btn--ghost"
+            disabled={limpandoFila || offers.length === 0}
+            onClick={() => void limparFila()}
+          >
+            {limpandoFila ? 'Limpando...' : 'Limpar fila'}
           </button>
           <button className="btn btn--ghost" onClick={() => void load(aba)}>
             Atualizar

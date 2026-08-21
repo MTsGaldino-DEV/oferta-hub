@@ -138,6 +138,24 @@ export async function offerRoutes(app: FastifyInstance) {
     };
   });
 
+  /**
+   * Esvazia a fila de uma vez: manda tudo que esta PENDING pra SKIPPED. Nao
+   * apaga -- so tira da frente, igual ao "Pular" de um produto so. Respeita
+   * a aba aberta: sem nicheId limpa a fila inteira, com nicheId limpa so
+   * aquele nicho (e "sem-nicho" limpa so o que nao tem nicho).
+   */
+  app.post<{ Body: { nicheId?: string } }>('/api/offers/limpar-fila', async (req) => {
+    const { nicheId } = z.object({ nicheId: z.string().optional() }).parse(req.body ?? {});
+    const { count } = await prisma.offer.updateMany({
+      where: {
+        status: OfferStatus.PENDING,
+        ...(nicheId === 'sem-nicho' ? { nicheId: null } : nicheId ? { nicheId } : {}),
+      },
+      data: { status: OfferStatus.SKIPPED },
+    });
+    return { ok: true, removidas: count };
+  });
+
   /** Modo manual: voce cola o link, o sistema faz o resto. */
   app.post<{ Body: { url: string; note?: string } }>('/api/offers', async (req, reply) => {
     const { url, note } = z.object({ url: z.string().url(), note: z.string().max(400).optional() }).parse(req.body);
