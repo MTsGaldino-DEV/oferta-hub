@@ -52,23 +52,46 @@ const serialize = (o: any) => ({
 });
 
 export async function offerRoutes(app: FastifyInstance) {
-  /** Fila de curadoria, ordenada pela nota. */
+  /** Fila de curadoria, ordenada pela nota -- exceto captura do ML pela extensao. */
   app.get<{ Querystring: { status?: OfferStatus; limit?: string; nicheId?: string } }>(
     '/api/offers',
     async (req) => {
     const status = req.query.status ?? OfferStatus.PENDING;
     // "sem-nicho" pega o que foi colado na mao ou veio de regra por palavra.
     const nicheId = req.query.nicheId;
-    const offers = await prisma.offer.findMany({
-      where: {
-        status,
-        ...(nicheId === 'sem-nicho' ? { nicheId: null } : nicheId ? { nicheId } : {}),
-      },
-      include: { product: true, shortLink: true, niche: true },
-      orderBy: status === OfferStatus.PENDING ? [{ score: 'desc' }, { createdAt: 'desc' }] : { createdAt: 'desc' },
-      take: Number(req.query.limit ?? 60),
-    });
-    return offers.map(serialize);
+    const where = {
+      status,
+      ...(nicheId === 'sem-nicho' ? { nicheId: null } : nicheId ? { nicheId } : {}),
+    };
+    const include = { product: true, shortLink: true, niche: true };
+    const take = Number(req.query.limit ?? 60);
+
+    if (status !== OfferStatus.PENDING) {
+      const offers = await prisma.offer.findMany({ where, include, orderBy: { createdAt: 'desc' }, take });
+      return offers.map(serialize);
+    }
+
+    // A extensao ja captura na ordem de relevancia do ML -- reordenar pela
+    // nota so embaralha o que ja veio pronto. Essas ficam por ordem de
+    // captura, no topo; o resto da fila continua pela nota.
+    const [capturaExtensao, resto] = await Promise.all([
+      prisma.offer.findMany({
+        where: { ...where, source: OfferSource.MANUAL, product: { platform: Platform.MERCADO_LIVRE } },
+        include,
+        orderBy: { createdAt: 'asc' },
+        take,
+      }),
+      prisma.offer.findMany({
+        where: {
+          ...where,
+          NOT: { source: OfferSource.MANUAL, product: { platform: Platform.MERCADO_LIVRE } },
+        },
+        include,
+        orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
+        take,
+      }),
+    ]);
+    return [...capturaExtensao, ...resto].slice(0, take).map(serialize);
     },
   );
 
@@ -92,6 +115,20 @@ export async function offerRoutes(app: FastifyInstance) {
         total: g._count._all,
       }))
       .sort((a, b) => b.total - a.total);
+  });
+
+  /**
+   * Quantas ofertas ja saem hoje pro grupo. E dia de calendario (00h de hoje
+   * ate agora, no fuso do servidor) -- diferente do /api/stats/overview, que
+   * usa janela corrida de N dias e nao serve pra "quantas ja mandei hoje".
+   */
+  app.get('/api/offers/enviadas-hoje', async () => {
+    const inicioDoDia = new Date();
+    inicioDoDia.setHours(0, 0, 0, 0);
+    const total = await prisma.offer.count({
+      where: { status: OfferStatus.SENT, sentAt: { gte: inicioDoDia } },
+    });
+    return { total };
   });
 
   /**
