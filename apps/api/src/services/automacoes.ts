@@ -11,6 +11,18 @@ import { sendOffer } from './dispatch.js';
  * quem manda de verdade continua sendo o mesmo sendOffer de sempre.
  */
 
+/**
+ * Tolerancia na checagem do intervalo.
+ *
+ * `lastRunAt` e gravado DEPOIS do envio -- que leva alguns segundos (o
+ * "digitando..." simulado em whatsapp.sendOffer). Com intervalo=5min, tick do
+ * cron as :15 e o envio fecha as :15:03; no tick de :20 ja se passaram so
+ * 4min57s desde lastRunAt, MENOS que o intervalo -- pula, e a rodada real so
+ * sai as :25. Foi o que aconteceu: 16:15 -> 16:25 em vez de 16:15 -> 16:20.
+ * 60s de folga absorve essa deriva sem abrir brecha de verdade no intervalo.
+ */
+const TOLERANCIA_MS = 60_000;
+
 /** Ela pode rodar agora? Dia da semana, janela do dia, intervalo desde a ultima vez. */
 export function deveRodar(rule: AutomationRule, agora: Date): boolean {
   if (!rule.active) return false;
@@ -20,8 +32,8 @@ export function deveRodar(rule: AutomationRule, agora: Date): boolean {
   if (hhmm < rule.windowStart || hhmm > rule.windowEnd) return false;
 
   if (rule.lastRunAt) {
-    const minutosDesde = (agora.getTime() - rule.lastRunAt.getTime()) / 60_000;
-    if (minutosDesde < rule.intervalMinutes) return false;
+    const decorridoMs = agora.getTime() - rule.lastRunAt.getTime();
+    if (decorridoMs < rule.intervalMinutes * 60_000 - TOLERANCIA_MS) return false;
   }
   return true;
 }
