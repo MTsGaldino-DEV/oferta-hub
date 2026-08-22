@@ -8,6 +8,7 @@ import { logger } from './lib/logger.js';
 import { authRoutes, requireAuth } from './plugins/auth.js';
 import { automacaoRoutes } from './routes/automacoes.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { disparoRoutes } from './routes/disparos.js';
 import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
 import { nichoRoutes } from './routes/nichos.js';
 import { offerRoutes } from './routes/offers.js';
@@ -72,6 +73,7 @@ await app.register(async (instance) => {
   instance.addHook('onRequest', requireAuth);
   await instance.register(automacaoRoutes);
   await instance.register(credentialRoutes);
+  await instance.register(disparoRoutes);
   await instance.register(extensaoAdminRoutes);
   await instance.register(nichoRoutes);
   await instance.register(offerRoutes);

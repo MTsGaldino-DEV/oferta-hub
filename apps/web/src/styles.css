@@ -1341,6 +1341,74 @@ button.chip {
   }
 }
 
+/* ---------------- disparos: passo a passo e barra de progresso ---------------- */
+
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.steps__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.steps__num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.steps__item[data-on='true'] {
+  color: var(--ink);
+}
+
+.steps__item[data-on='true'] .steps__num {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.steps__item[data-done='true'] .steps__num {
+  background: var(--gain);
+  border-color: var(--gain);
+  color: #fff;
+}
+
+.steps__sep {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+  min-width: 20px;
+}
+
+.progress {
+  height: 8px;
+  border-radius: 20px;
+  background: var(--canvas);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.progress__bar {
+  height: 100%;
+  background: var(--gain);
+  transition: width 200ms ease;
+}
+
 /* ---------------------------------------------------------------
    Modo escuro: ajustes pontuais
    O flip de token quebra qualquer lugar que usava --ink como FUNDO
@@ -1365,6 +1433,11 @@ button.chip {
 }
 
 [data-theme='dark'] .tabs__item[data-on='true'] {
+  background: #3a3b40;
+  border-color: #3a3b40;
+}
+
+[data-theme='dark'] .steps__item[data-on='true'] .steps__num {
   background: #3a3b40;
   border-color: #3a3b40;
 }

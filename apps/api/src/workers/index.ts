@@ -12,6 +12,7 @@ import { buscarPorNicho, carregarNicho } from '../services/nichos.js';
 import { ingestProduct, upsertProduct } from '../services/ingest.js';
 import { sendOffer } from '../services/dispatch.js';
 import { runAutomacoes } from '../services/automacoes.js';
+import { runDisparos } from '../services/disparo.js';
 
 /**
  * Resumo do que uma rodada fez. Existe porque disparo manual sem retorno e
@@ -148,7 +149,10 @@ export async function runDiscovery(): Promise<DiscoverySummary> {
             offers: {
               where: {
                 OR: [
-                  { status: { in: [OfferStatus.PENDING, OfferStatus.QUEUED] } },
+                  // DISPATCHING entra aqui: oferta reservada por um Disparo
+                  // ainda esta "ativa" pro produto, so ainda nao saiu -- sem
+                  // isso o garimpo duplicava o produto no meio de um disparo.
+                  { status: { in: [OfferStatus.PENDING, OfferStatus.QUEUED, OfferStatus.DISPATCHING] } },
                   { sentAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
                 ],
               },
@@ -284,6 +288,9 @@ export async function seedNichosProntos(): Promise<number> {
 export function startWorkers() {
   const tz = 'America/Sao_Paulo';
   cron.schedule('*/1 * * * *', () => void runScheduler(), { timezone: tz });
+  // Disparos: mesmo ritmo do agendador, motivo separado -- QUEUED e
+  // DISPATCHING sao filas diferentes de proposito (ver services/disparo.ts).
+  cron.schedule('*/1 * * * *', () => void runDisparos(), { timezone: tz });
   cron.schedule('*/5 * * * *', () => void runAutomacoes(), { timezone: tz });
   cron.schedule('7 * * * *', () => void runPriceMonitor(), { timezone: tz });
   cron.schedule('23 */3 * * *', () => void runDiscovery(), { timezone: tz });

@@ -119,7 +119,11 @@ export async function extensaoRoutes(app: FastifyInstance) {
               platform_externalId: { platform: bruto.platform, externalId: bruto.externalId },
             },
             include: {
-              offers: { where: { status: { in: ['PENDING', 'QUEUED'] } }, take: 1 },
+              // DISPATCHING entra pra nao recapturar um produto que esta no
+              // meio de um Disparo (a oferta ainda nao saiu, so ja foi
+              // reservada) -- sem isso a extensao criava uma segunda oferta
+              // pro mesmo produto enquanto o disparo estava rodando.
+              offers: { where: { status: { in: ['PENDING', 'QUEUED', 'DISPATCHING'] } }, take: 1 },
             },
           });
           if (jaTem?.offers.length) {

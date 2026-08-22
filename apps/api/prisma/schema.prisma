@@ -18,7 +18,8 @@ enum Platform {
 
 enum OfferStatus {
   PENDING // esperando sua analise na fila
-  QUEUED // aprovada, aguardando horario
+  QUEUED // aprovada, aguardando horario (Agenda)
+  DISPATCHING // reservada por um Disparo -- fora da fila ate ele terminar ou ser cancelado
   SENT
   SKIPPED
   FAILED
@@ -121,6 +122,7 @@ model Offer {
   niche       Niche?       @relation(fields: [nicheId], references: [id], onDelete: SetNull)
   shortLink   ShortLink?
   conversions Conversion[]
+  disparoItems DisparoItem[]
 
   @@index([status, score])
   @@index([nicheId, status])
@@ -338,6 +340,79 @@ model MessageTemplate {
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  disparos Disparo[]
+}
+
+enum DisparoStatus {
+  DRAFT // criado, aguardando a hora de comecar (imediato ja nasce SENDING)
+  SENDING // o worker ja tocou em algum item -- em andamento
+  DONE // todos os itens resolvidos (enviado ou falhou)
+  CANCELLED
+}
+
+enum DisparoItemStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Disparo manual em massa: um lote de ofertas x grupos, espacado no tempo.
+/// Ao criar, as ofertas escolhidas saem da fila (Offer.status vira
+/// DISPATCHING) pra nao serem pegas de novo pela curadoria manual nem por
+/// automacoes enquanto o disparo esta rodando. Ver services/disparo.ts.
+model Disparo {
+  id     String        @id @default(cuid())
+  status DisparoStatus @default(DRAFT)
+
+  templateId String
+  template   MessageTemplate @relation(fields: [templateId], references: [id])
+
+  /// Grupos de destino -- toda oferta do disparo vai pra cada um deles, um
+  /// DisparoItem por par (oferta, grupo).
+  groupJids String[]
+
+  /// Quando o primeiro envio deve sair. "Agora" grava o instante da criacao.
+  startAt DateTime
+  /// Espaco entre um envio e o proximo, em minutos. Piso de 5 (Zod na rota).
+  intervalMinutes Int
+
+  /// Guardas de seguranca: envio que caia dentro da janela e adiado, nunca
+  /// pulado ou mandado do mesmo jeito. Fuso America/Sao_Paulo.
+  avoidNightHours Boolean @default(true) // nao manda 23h-06h
+  avoidWeekends   Boolean @default(false) // nao manda sabado/domingo
+  /// Guardado mas sem efeito por enquanto: o dono ainda nao decidiu como
+  /// detectar oferta expirada. O worker le esse campo e ignora -- existe so
+  /// pra nao perder a escolha do usuario quando a checagem for implementada.
+  skipExpiredOffers Boolean @default(false)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  cancelledAt DateTime?
+
+  items DisparoItem[]
+
+  @@index([status])
+}
+
+/// Um envio dentro de um disparo: um par (oferta, grupo). E o que da pra
+/// contar progresso ("8 ofertas x 2 grupos = 16 envios, 3 feitos") e pro
+/// worker achar o proximo que vence.
+model DisparoItem {
+  id        String            @id @default(cuid())
+  disparoId String
+  disparo   Disparo           @relation(fields: [disparoId], references: [id], onDelete: Cascade)
+  offerId   String
+  offer     Offer             @relation(fields: [offerId], references: [id])
+  groupJid  String
+  status    DisparoItemStatus @default(PENDING)
+
+  scheduledFor DateTime
+  sentAt       DateTime?
+  failReason   String?
+
+  @@index([status, scheduledFor])
+  @@index([disparoId])
 }
 
 /// Contador diario de envios, pra respeitar o teto e nao queimar o numero.
