@@ -12,8 +12,7 @@ import { Produtos } from './pages/Produtos.js';
 import { Agenda } from './pages/Agenda.js';
 import { Automacoes } from './pages/Automacoes.js';
 import { Disparos } from './pages/Disparos.js';
-import { Templates } from './pages/Templates.js';
-import { Conexoes } from './pages/Conexoes.js';
+import { Configuracoes } from './pages/Configuracoes.js';
 
 function Login({ onIn }: { onIn: () => void }) {
   const [password, setPassword] = useState('');
@@ -91,8 +90,7 @@ export default function App() {
         <Route path="/agenda" element={<Agenda />} />
         <Route path="/automacoes" element={<Automacoes />} />
         <Route path="/disparos" element={<Disparos />} />
-        <Route path="/templates" element={<Templates />} />
-        <Route path="/conexoes" element={<Conexoes />} />
+        <Route path="/configuracoes" element={<Configuracoes />} />
       </Routes>
     </Layout>
   );

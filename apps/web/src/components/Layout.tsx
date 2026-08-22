@@ -21,7 +21,6 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
       { to: '/agenda', label: 'Agenda' },
       { to: '/automacoes', label: 'Automações' },
       { to: '/disparos', label: 'Disparos' },
-      { to: '/templates', label: 'Modelos' },
     ],
   },
   {
@@ -31,7 +30,7 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
       { to: '/grupos', label: 'Meus Grupos' },
     ],
   },
-  { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
+  { label: 'Configurações', items: [{ to: '/configuracoes', label: 'Configurações' }] },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
