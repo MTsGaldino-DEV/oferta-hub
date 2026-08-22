@@ -22,7 +22,6 @@ function valores(d: TemplateOfferData): Record<Token, string | null> {
 }
 
 const TOKEN_RE = /\{([A-Z_]+)\}/g;
-const PRECO_ANTIGO_RISCADO_RE = /~\{PRECO_ANTIGO\}~/g;
 
 /**
  * Troca os tokens {TITULO} {PRECO} {PRECO_ANTIGO} {LINK} {CUPOM} pelos dados
@@ -31,13 +30,12 @@ const PRECO_ANTIGO_RISCADO_RE = /~\{PRECO_ANTIGO\}~/g;
  * Token desconhecido (typo tipo {TITULOO}): fica intacto no texto -- apagar
  * silenciosamente esconderia o erro de quem escreveu o modelo.
  *
- * Token conhecido sem valor (sem cupom, sem preco antigo): some sem deixar
- * rastro. Se a linha inteira so existia por causa desse token (ex: "Cupom:
- * {CUPOM}" numa linha propria), a linha inteira e removida -- nada de linha
- * em branco no lugar. Se o token divide linha com outro que tem valor (ex:
- * "De ~{PRECO_ANTIGO}~ por *{PRECO}*"), so o par "~{PRECO_ANTIGO}~" vira
- * nada, pra nao sobrar um "~~" solto (risco vazio nao significa nada no
- * WhatsApp).
+ * Token conhecido sem valor (sem cupom, sem preco antigo): a linha inteira
+ * some, mesmo que outros tokens dela tenham valor. Motivo: uma linha como
+ * "De ~{PRECO_ANTIGO}~ por *{PRECO}*" sem preco antigo nao vira frase
+ * valida so tirando o token ("De por *R$ 89,90*") -- fica quebrada. Por
+ * isso quem escreve o modelo deve colocar o fallback (o preco simples)
+ * numa linha propria separada, ja que uma linha mista some por inteiro.
  */
 export function renderTemplate(
   body: string,
@@ -52,12 +50,11 @@ export function renderTemplate(
       .map((m) => m[1] as Token)
       .filter((nome) => nome in vals);
 
-    if (tokensConhecidos.length > 0 && tokensConhecidos.every((nome) => vals[nome] === null)) {
-      return null; // linha so existia por causa de um token ausente
+    if (tokensConhecidos.length > 0 && tokensConhecidos.some((nome) => vals[nome] === null)) {
+      return null; // linha tinha um token conhecido sem valor
     }
 
-    let out = linha.replace(PRECO_ANTIGO_RISCADO_RE, vals.PRECO_ANTIGO === null ? '' : `~${vals.PRECO_ANTIGO}~`);
-    out = out.replace(TOKEN_RE, (match, nome: string) => {
+    const out = linha.replace(TOKEN_RE, (match, nome: string) => {
       if (!(nome in vals)) return match; // token desconhecido: mantem visivel
       const v = vals[nome as Token];
       return v === null ? '' : v;
