@@ -6,7 +6,8 @@ import { Logo } from './Logo.js';
 type NavLinkDef = { to: string; label: string; end?: boolean };
 
 const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
-  { label: null, items: [{ to: '/', label: 'Fila', end: true }] },
+  { label: null, items: [{ to: '/', label: 'Visão geral', end: true }] },
+  { label: null, items: [{ to: '/fila', label: 'Fila' }] },
   {
     label: 'Catálogo',
     items: [
@@ -54,7 +55,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               {g.items.map((l) => (
                 <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
                   {l.label}
-                  {l.to === '/' && pending > 0 && <span className="rail__count">{pending}</span>}
+                  {l.to === '/fila' && pending > 0 && <span className="rail__count">{pending}</span>}
                 </NavLink>
               ))}
             </div>

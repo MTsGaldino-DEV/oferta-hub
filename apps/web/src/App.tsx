@@ -3,6 +3,7 @@ import { Route, Routes } from 'react-router-dom';
 import { api } from './api.js';
 import { Layout } from './components/Layout.js';
 import { Logo } from './components/Logo.js';
+import { VisaoGeral } from './pages/VisaoGeral.js';
 import { Fila } from './pages/Fila.js';
 import { Desempenho } from './pages/Desempenho.js';
 import { Nichos } from './pages/Nichos.js';
@@ -78,7 +79,8 @@ export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Fila />} />
+        <Route path="/" element={<VisaoGeral />} />
+        <Route path="/fila" element={<Fila />} />
         <Route path="/desempenho" element={<Desempenho />} />
         <Route path="/produtos" element={<Produtos />} />
         <Route path="/nichos" element={<Nichos />} />
