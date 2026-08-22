@@ -5,9 +5,18 @@ import { criarDisparo, cancelarDisparo } from '../services/disparo.js';
 
 const corpoDisparo = z
   .object({
-    offerIds: z.array(z.string().min(1)).min(1, 'Escolha ao menos uma oferta.'),
+    // Dedupe aqui, nao so na UI: ["G1","G1"] geraria dois pares (oferta,
+    // grupo) identicos e mandaria a mesma mensagem duas vezes pro mesmo
+    // grupo. Simetrico pra offerIds pelo mesmo motivo.
+    offerIds: z
+      .array(z.string().min(1))
+      .min(1, 'Escolha ao menos uma oferta.')
+      .transform((a) => [...new Set(a)]),
     templateId: z.string().min(1, 'Escolha um modelo de mensagem.'),
-    groupJids: z.array(z.string().min(1)).min(1, 'Escolha ao menos um grupo de destino.'),
+    groupJids: z
+      .array(z.string().min(1))
+      .min(1, 'Escolha ao menos um grupo de destino.')
+      .transform((a) => [...new Set(a)]),
     startNow: z.boolean(),
     scheduledFor: z.string().datetime().optional(),
     // Piso de 5min e regra de negocio, nao so de UI -- e o que impede um
@@ -19,6 +28,12 @@ const corpoDisparo = z
   })
   .refine((b) => b.startNow || b.scheduledFor, {
     message: 'Escolha "Agora" ou uma data para agendar.',
+    path: ['scheduledFor'],
+  })
+  .refine((b) => b.startNow || new Date(b.scheduledFor!).getTime() > Date.now(), {
+    // Uma data no passado faz todo item nascer "vencido" e o disparo drenar
+    // a fila inteira de uma vez -- ver o gate de intervalMinutes em disparo.ts.
+    message: 'A data agendada precisa ser no futuro.',
     path: ['scheduledFor'],
   });
 

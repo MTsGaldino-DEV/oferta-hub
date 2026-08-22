@@ -3,8 +3,14 @@ import { prisma, num } from '../db.js';
 import { logger } from '../lib/logger.js';
 import { sendOffer } from './dispatch.js';
 import { renderTemplate } from './template.js';
+import { WhatsAppRetryableError } from '../whatsapp/baileys.js';
 
 const MINUTE_MS = 60_000;
+// Teto diario nao reseta antes da virada do dia e uma reconexao do WhatsApp
+// costuma levar segundos a poucos minutos -- 30min evita tanto martelar a
+// cada tick (o bug que isso corrige) quanto travar o disparo por horas numa
+// reconexao rapida.
+const RETRY_DELAY_MINUTES = 30;
 
 export interface CriarDisparoInput {
   offerIds: string[];
@@ -65,20 +71,31 @@ export async function criarDisparo(input: CriarDisparoInput) {
       },
       include: { items: true, template: true },
     });
-    await tx.offer.updateMany({
-      where: { id: { in: input.offerIds } },
+    // Filtra por PENDING de novo aqui dentro (nao so no findMany la em cima):
+    // entre a leitura e esta escrita, outro criarDisparo concorrente pode ter
+    // reservado a mesma oferta. So esta updateMany e atomica o bastante pra
+    // pegar isso -- se sobrar oferta que nao virou DISPATCHING, alguem chegou
+    // primeiro, e o throw derruba a transacao inteira (nao cria o disparo
+    // pela metade nem forca de volta uma oferta que virou SENT nesse meio-tempo).
+    const reservadas = await tx.offer.updateMany({
+      where: { id: { in: input.offerIds }, status: OfferStatus.PENDING },
       data: { status: OfferStatus.DISPATCHING },
     });
+    if (reservadas.count !== input.offerIds.length) {
+      throw new Error('Alguma oferta escolhida ja nao esta mais pendente -- atualize a lista.');
+    }
     return disparo;
   });
 }
 
 /**
  * Cancela o disparo: os itens que ainda nao saíram viram FAILED (com motivo
- * "Disparo cancelado"), e SO as ofertas que ainda estavam DISPATCHING voltam
- * pra PENDING (Fila). Uma oferta que ja saiu pra pelo menos um grupo ja
- * esta SENT (sendOffer marca isso no primeiro envio) -- essa nao volta:
- * nao da pra desenviar uma mensagem de WhatsApp, e reaparecer na Fila
+ * "Disparo cancelado"), e as ofertas voltam pra PENDING (Fila) em dois casos:
+ * as que ainda estavam DISPATCHING (nunca tentaram sair), e as que estao
+ * FAILED sem nenhum DisparoItem SENT neste disparo (tentaram e todo envio
+ * falhou -- sem isso ficam presas em FAILED, invisiveis em toda pagina do
+ * app). Uma oferta que ja saiu pra pelo menos um grupo fica SENT e essa nao
+ * volta: nao da pra desenviar uma mensagem de WhatsApp, e reaparecer na Fila
  * sugeriria que ela nunca saiu.
  */
 export async function cancelarDisparo(id: string) {
@@ -89,7 +106,13 @@ export async function cancelarDisparo(id: string) {
   }
 
   const pendentes = disparo.items.filter((i) => i.status === DisparoItemStatus.PENDING);
-  const offerIds = [...new Set(pendentes.map((i) => i.offerId))];
+  const dispatchingIds = [...new Set(pendentes.map((i) => i.offerId))];
+
+  const sentOfferIds = new Set(
+    disparo.items.filter((i) => i.status === DisparoItemStatus.SENT).map((i) => i.offerId),
+  );
+  const failedOfferIds = [...new Set(disparo.items.filter((i) => i.status === DisparoItemStatus.FAILED).map((i) => i.offerId))];
+  const failedSemSent = failedOfferIds.filter((oid) => !sentOfferIds.has(oid));
 
   await prisma.$transaction([
     prisma.disparoItem.updateMany({
@@ -97,8 +120,12 @@ export async function cancelarDisparo(id: string) {
       data: { status: DisparoItemStatus.FAILED, failReason: 'Disparo cancelado.' },
     }),
     prisma.offer.updateMany({
-      where: { id: { in: offerIds }, status: OfferStatus.DISPATCHING },
+      where: { id: { in: dispatchingIds }, status: OfferStatus.DISPATCHING },
       data: { status: OfferStatus.PENDING },
+    }),
+    prisma.offer.updateMany({
+      where: { id: { in: failedSemSent }, status: OfferStatus.FAILED },
+      data: { status: OfferStatus.PENDING, failReason: null },
     }),
     prisma.disparo.update({
       where: { id },
@@ -107,14 +134,20 @@ export async function cancelarDisparo(id: string) {
   ]);
 }
 
+// Hoisted pro modulo: proximoLiberado chama bloqueado() minuto a minuto (ate
+// ~3300x no pior caso), e construir um Intl.DateTimeFormat novo a cada volta
+// e desperdicio -- a formatacao em si (formatToParts) ja recebe o `t` de cada
+// chamada, o formatter e reutilizavel.
+const fusoSaoPaulo = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/Sao_Paulo',
+  hourCycle: 'h23',
+  hour: '2-digit',
+  weekday: 'short',
+});
+
 /** Horario (America/Sao_Paulo) ou dia da semana bloqueiam o envio agora? */
 function bloqueado(t: Date, avoidNightHours: boolean, avoidWeekends: boolean): boolean {
-  const partes = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'America/Sao_Paulo',
-    hourCycle: 'h23',
-    hour: '2-digit',
-    weekday: 'short',
-  }).formatToParts(t);
+  const partes = fusoSaoPaulo.formatToParts(t);
   const hora = Number(partes.find((p) => p.type === 'hour')?.value ?? '0');
   const diaSemana = partes.find((p) => p.type === 'weekday')?.value;
 
@@ -152,10 +185,16 @@ function proximoLiberado(de: Date, avoidNightHours: boolean, avoidWeekends: bool
  * Isso e exatamente a rajada que o intervalo minimo existe pra evitar.
  * Recalculando a cauda inteira a partir do novo inicio, o espacamento
  * configurado se mantem intacto -- so desliza no tempo, nunca comprime.
+ *
+ * `atrasoMs` desloca o ponto de partida antes de procurar o proximo horario
+ * liberado -- usado no retry de erro retryable (teto diario / desconectado),
+ * pra nao recalcular a cauda pra "agora" (que so bateria de novo na mesma
+ * falha no proximo tick).
  */
 async function adiar(
   item: { disparoId: string; scheduledFor: Date },
   disparo: { intervalMinutes: number; avoidNightHours: boolean; avoidWeekends: boolean },
+  atrasoMs = 0,
 ) {
   const cauda = await prisma.disparoItem.findMany({
     where: {
@@ -165,7 +204,7 @@ async function adiar(
     },
     orderBy: { scheduledFor: 'asc' },
   });
-  const inicio = proximoLiberado(new Date(), disparo.avoidNightHours, disparo.avoidWeekends);
+  const inicio = proximoLiberado(new Date(Date.now() + atrasoMs), disparo.avoidNightHours, disparo.avoidWeekends);
 
   await prisma.$transaction(
     cauda.map((it, i) =>
@@ -206,6 +245,17 @@ function dadosTemplate(offer: {
  * as duas chamariam sendOffer pro mesmo par (oferta, grupo) -- mensagem
  * duplicada. So funciona com uma instancia da API rodando, que e o caso
  * hoje; com mais de um processo precisaria de lock no banco.
+ *
+ * Ordem claim-antes-de-enviar: reservamos o item (PENDING -> SENT) ANTES de
+ * chamar sendOffer, nao depois. Se o processo cair (deploy, restart, OOM) ou
+ * o proprio UPDATE de "marcar enviado" falhar (pool esgotado, erro de rede
+ * no banco) DEPOIS do envio de verdade, o item antigo ficava PENDING e era
+ * reenviado no proximo tick -- repetidamente, pra um numero que pode ser
+ * banido. Com a reserva vindo primeiro, o pior caso vira o oposto: o envio
+ * falha meio do caminho e o item fica marcado SENT sem ter saido de fato
+ * (envio perdido, nao reenviado). Perder um envio ocasional e aceitavel;
+ * reenviar em loop pro grupo errado numero de vezes nao e -- essa e a troca
+ * deliberada aqui.
  */
 let rodando = false;
 export async function runDisparos() {
@@ -232,23 +282,70 @@ export async function runDisparos() {
       processados.add(item.disparoId);
 
       const { disparo } = item;
-      if (disparo.status === DisparoStatus.DRAFT) {
-        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.SENDING } });
-      }
 
       if (bloqueado(new Date(), disparo.avoidNightHours, disparo.avoidWeekends)) {
         await adiar(item, disparo);
         continue;
       }
 
+      // Pacing por disparo: se o startAt caiu no passado (ou o disparo ficou
+      // parado numa janela bloqueada), varios itens ficam "vencidos" de uma
+      // vez. Sem essa checagem, cada tick manda o proximo vencido -- um por
+      // minuto, bem mais rapido que o intervalMinutes configurado. So manda
+      // de novo quando ja passou intervalMinutes desde o ultimo envio deste
+      // disparo.
+      const ultimoEnvio = await prisma.disparoItem.findFirst({
+        where: { disparoId: disparo.id, status: DisparoItemStatus.SENT },
+        orderBy: { sentAt: 'desc' },
+      });
+      if (ultimoEnvio?.sentAt && Date.now() - ultimoEnvio.sentAt.getTime() < disparo.intervalMinutes * MINUTE_MS) {
+        continue;
+      }
+
+      // So flipa DRAFT -> SENDING quando o trabalho de fato comeca -- antes
+      // disso (bloqueado ou aguardando pacing) o disparo ainda nao mandou
+      // nada, e "enviando" seria mentira por horas numa janela bloqueada.
+      if (disparo.status === DisparoStatus.DRAFT) {
+        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.SENDING } });
+      }
+
+      // Reserva atomica: so entra quem ainda achar o item PENDING. Se outra
+      // rodada (ou um cancelamento) ja mexeu nele, count fica 0 e pulamos --
+      // sem isso duas rodadas sobrepostas mandariam a mesma mensagem duas vezes.
+      const claim = await prisma.disparoItem.updateMany({
+        where: { id: item.id, status: DisparoItemStatus.PENDING },
+        data: { status: DisparoItemStatus.SENT, sentAt: new Date() },
+      });
+      if (claim.count !== 1) continue;
+
       try {
         const texto = renderTemplate(disparo.template.body, dadosTemplate(item.offer), disparo.template.ctas);
         await sendOffer(item.offerId, item.groupJid, { message: texto, allowResend: true });
-        await prisma.disparoItem.update({
-          where: { id: item.id },
-          data: { status: DisparoItemStatus.SENT, sentAt: new Date() },
-        });
+        // Sucesso: o claim acima ja gravou SENT/sentAt, nada mais a fazer.
       } catch (err) {
+        if (err instanceof WhatsAppRetryableError) {
+          // Retryable (teto diario ou desconectado): desfaz a reserva --
+          // volta o item pra PENDING -- e adia a cauda inteira pro retry, em
+          // vez de queimar o item e a oferta como se fosse erro definitivo.
+          // dispatch.ts (sendOffer) ja marcou a OFERTA como FAILED no catch
+          // dele antes de repassar o erro; aqui desfazemos isso tambem,
+          // porque a oferta continua "em disparo" de verdade, so adiada.
+          await prisma.disparoItem.updateMany({
+            where: { id: item.id, status: DisparoItemStatus.SENT },
+            data: { status: DisparoItemStatus.PENDING, sentAt: null },
+          });
+          await prisma.offer.updateMany({
+            where: { id: item.offerId, status: OfferStatus.FAILED },
+            data: { status: OfferStatus.DISPATCHING, failReason: null },
+          });
+          logger.warn(
+            { disparoId: disparo.id, itemId: item.id, motivo: err.message },
+            'envio de disparo adiado (falha retryable)',
+          );
+          await adiar(item, disparo, RETRY_DELAY_MINUTES * MINUTE_MS);
+          continue;
+        }
+
         const failReason = err instanceof Error ? err.message : 'erro desconhecido';
         logger.error({ disparoId: disparo.id, itemId: item.id, failReason }, 'envio de disparo falhou');
         await prisma.disparoItem.update({
@@ -261,7 +358,14 @@ export async function runDisparos() {
         where: { disparoId: disparo.id, status: DisparoItemStatus.PENDING },
       });
       if (restam === 0) {
-        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.DONE } });
+        // updateMany com o status como parte do where: se um cancelamento
+        // concorrente ja levou o disparo pra CANCELLED enquanto este ultimo
+        // envio estava em voo, essa checagem impede reescrever por cima com
+        // DONE e apagar o fato de que foi cancelado.
+        await prisma.disparo.updateMany({
+          where: { id: disparo.id, status: { in: [DisparoStatus.DRAFT, DisparoStatus.SENDING] } },
+          data: { status: DisparoStatus.DONE },
+        });
       }
     }
   } finally {

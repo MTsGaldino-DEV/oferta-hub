@@ -74,6 +74,19 @@ async function gerarPreviewImagem(sock: WASocket, url: string): Promise<Record<s
 
 type Status = 'disconnected' | 'connecting' | 'qr' | 'connected';
 
+/**
+ * Falha rotineira que some sozinha: teto diario ainda nao resetou, ou o
+ * numero esta reconectando. Quem chama sendOffer (o worker de Disparos) usa
+ * `instanceof` pra distinguir isso de um erro de verdade -- string matching
+ * em mensagem de erro quebraria silenciosamente se o texto mudasse.
+ */
+export class WhatsAppRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WhatsAppRetryableError';
+  }
+}
+
 class WhatsAppService {
   private sock: WASocket | null = null;
   private lastSentAt = 0;
@@ -210,7 +223,7 @@ class WhatsAppService {
       update: {},
     });
     if (log.count >= env.wa.dailyCap) {
-      throw new Error(
+      throw new WhatsAppRetryableError(
         `Teto diario de ${env.wa.dailyCap} envios atingido. Isso e proposital: passar disso e o caminho mais rapido pro ban.`,
       );
     }
@@ -252,7 +265,7 @@ class WhatsAppService {
     // checagem antes de qualquer uma contar o proprio envio.
     return this.lock(async () => {
       if (!this.sock || this.status !== 'connected') {
-        throw new Error('WhatsApp desconectado. Pareie o numero em Conexoes.');
+        throw new WhatsAppRetryableError('WhatsApp desconectado. Pareie o numero em Conexoes.');
       }
 
       const day = await this.checkQuota();

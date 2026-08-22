@@ -14,6 +14,11 @@ interface Grupo {
   isDefault: boolean;
 }
 
+interface Quota {
+  used: number;
+  cap: number;
+}
+
 interface DisparoResumo {
   id: string;
   status: 'DRAFT' | 'SENDING' | 'DONE' | 'CANCELLED';
@@ -57,6 +62,12 @@ function fmt(iso: string | null) {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/** Agora, no fuso local, no formato que <input type="datetime-local" min> espera. */
+function proximoMinutoLocal(): string {
+  const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000);
+  return d.toISOString().slice(0, 16);
+}
+
 const PASSOS = ['Ofertas', 'Mensagem', 'Destinos'];
 
 export function Disparos() {
@@ -91,7 +102,9 @@ export function Disparos() {
 function NovoDisparo({ onCriado }: { onCriado: () => void }) {
   const [step, setStep] = useState(1);
 
+  const OFFERS_LIMIT = 500;
   const [offers, setOffers] = useState<Offer[]>([]);
+  const [offersTruncated, setOffersTruncated] = useState(false);
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [loadingOffers, setLoadingOffers] = useState(true);
 
@@ -101,6 +114,7 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
 
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [groupJids, setGroupJids] = useState<Set<string>>(new Set());
+  const [quota, setQuota] = useState<Quota | null>(null);
   const [quando, setQuando] = useState<'agora' | 'agendar'>('agora');
   const [agendadoPara, setAgendadoPara] = useState('');
   const [intervalMinutes, setIntervalMinutes] = useState(5);
@@ -114,9 +128,10 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
   useEffect(() => {
     setLoadingOffers(true);
     api
-      .get<Offer[]>('/api/offers?status=PENDING')
+      .get<Offer[]>(`/api/offers?status=PENDING&limit=${OFFERS_LIMIT}`)
       .then((os) => {
         setOffers(os);
+        setOffersTruncated(os.length >= OFFERS_LIMIT);
         setSelecionadas(new Set(os.map((o) => o.id)));
       })
       .catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar a fila.'))
@@ -124,8 +139,11 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
 
     api.get<TemplateLite[]>('/api/templates').then(setTemplates).catch(() => {});
     api
-      .get<{ groups: Grupo[] }>('/api/whatsapp/status')
-      .then((r) => setGrupos(r.groups ?? []))
+      .get<{ groups: Grupo[]; quota: Quota }>('/api/whatsapp/status')
+      .then((r) => {
+        setGrupos(r.groups ?? []);
+        setQuota(r.quota ?? null);
+      })
       .catch(() => {});
   }, []);
 
@@ -218,6 +236,11 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
               ? 'Carregando a fila...'
               : `${selecionadas.size} de ${offers.length} oferta(s) selecionada(s).`}
           </p>
+          {offersTruncated && (
+            <div className="notice" data-tone="warn" style={{ marginBottom: 10 }}>
+              A fila tem mais de {OFFERS_LIMIT} ofertas pendentes — mostrando só as {OFFERS_LIMIT} primeiras.
+            </div>
+          )}
           {!loadingOffers && offers.length === 0 && (
             <div className="empty">
               <strong>Fila vazia</strong>
@@ -377,6 +400,7 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
                   id="agendadoPara"
                   type="datetime-local"
                   value={agendadoPara}
+                  min={proximoMinutoLocal()}
                   onChange={(e) => setAgendadoPara(e.target.value)}
                 />
               </div>
@@ -385,9 +409,11 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
               <label htmlFor="intervalo">Intervalo (min)</label>
               <input
                 id="intervalo"
-                inputMode="numeric"
+                type="number"
+                min={5}
                 value={intervalMinutes}
-                onChange={(e) => setIntervalMinutes(Math.max(5, Number(e.target.value) || 5))}
+                onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+                onBlur={(e) => setIntervalMinutes(Math.max(5, Number(e.target.value) || 5))}
               />
               <small>mínimo 5 — um envio por vez, nunca rajada</small>
             </div>
@@ -439,6 +465,15 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
                 Previsão de término: {fim.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
               </>
             )}
+            {quota && (
+              <>
+                <br />
+                Teto diário: {quota.used}/{quota.cap} já usado hoje.
+                {totalEnvios > quota.cap - quota.used && (
+                  <> Esse disparo passa do teto — os envios excedentes ficam adiados até o teto liberar de novo.</>
+                )}
+              </>
+            )}
           </div>
 
           <div style={{ display: 'flex', gap: 8 }}>
@@ -459,6 +494,7 @@ function EmAndamento() {
   const [disparos, setDisparos] = useState<DisparoResumo[]>([]);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [itens, setItens] = useState<DisparoItemDetalhe[]>([]);
   const [cancelando, setCancelando] = useState<string | null>(null);
@@ -472,7 +508,12 @@ function EmAndamento() {
     Promise.all([
       carregar(),
       api.get<{ groups: Grupo[] }>('/api/whatsapp/status').then((r) => setGrupos(r.groups ?? [])),
-    ]).finally(() => setLoading(false));
+    ])
+      // Sem isso, uma falha aqui renderiza o empty state "Nenhum disparo criado"
+      // -- mentira justo na pagina que voce usaria pra cancelar um disparo
+      // fugindo do controle.
+      .catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar os disparos.'))
+      .finally(() => setLoading(false));
 
     // Progresso ao vivo: reconsulta enquanto essa aba estiver aberta.
     const t = setInterval(() => void carregar().catch(() => {}), 8000);
@@ -487,12 +528,24 @@ function EmAndamento() {
       return;
     }
     setExpandido(id);
-    const detalhe = await api.get<{ items: DisparoItemDetalhe[] }>(`/api/disparos/${id}`);
-    setItens(detalhe.items);
+    // Limpa antes de buscar: sem isso, expandir o card B mostra por um
+    // instante (ou pra sempre, se a busca falhar) as linhas velhas do card A.
+    setItens([]);
+    try {
+      const detalhe = await api.get<{ items: DisparoItemDetalhe[] }>(`/api/disparos/${id}`);
+      setItens(detalhe.items);
+    } catch {
+      // fica vazio -- melhor que travar mostrando os itens de outro disparo
+    }
   }
 
   async function cancelar(id: string) {
-    if (!confirm('Cancelar esse disparo? Os envios que ainda não saíram voltam pra fila; os que já saíram continuam enviados.')) return;
+    if (
+      !confirm(
+        'Cancelar esse disparo? Os envios que já saíram continuam enviados; as ofertas que ainda não saíram pra nenhum grupo voltam pra fila.',
+      )
+    )
+      return;
     setCancelando(id);
     try {
       await api.post(`/api/disparos/${id}/cancelar`);
@@ -505,6 +558,10 @@ function EmAndamento() {
   }
 
   if (loading) return null;
+
+  if (erro) {
+    return <div className="notice">{erro}</div>;
+  }
 
   if (disparos.length === 0) {
     return (
