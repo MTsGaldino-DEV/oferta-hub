@@ -323,7 +323,32 @@ model WhatsappGroup {
   jid       String   @unique
   name      String
   isDefault Boolean  @default(false)
+  /// Contagem atual de membros. Preenchida no syncGroups() completo (a cada
+  /// boot) e ajustada incrementalmente pelo evento group-participants.update
+  /// entre um sync e outro -- ver whatsapp/baileys.ts.
+  memberCount Int?
   updatedAt DateTime @updatedAt
+}
+
+enum GroupMemberAction {
+  ADD
+  REMOVE
+}
+
+/// Log de entrada/saida de membro, evento a evento. Existe porque uma
+/// contagem antes/depois esconde movimento: se 3 entram e 3 saem no mesmo
+/// dia, o total nao muda, mas "quantos entraram" so da pra responder com o
+/// evento de verdade, nao com a foto do antes/depois. So comeca a acumular a
+/// partir do deploy dessa feature -- entrada/saida anteriores a isso sao
+/// desconhecidas, nao zero (ver GET /api/groups e o campo trackingSince).
+model GroupMemberEvent {
+  id          String            @id @default(cuid())
+  groupJid    String
+  participant String
+  action      GroupMemberAction
+  occurredAt  DateTime          @default(now())
+
+  @@index([groupJid, occurredAt])
 }
 
 /// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}

@@ -6,6 +6,7 @@ import { Logo } from './components/Logo.js';
 import { VisaoGeral } from './pages/VisaoGeral.js';
 import { Fila } from './pages/Fila.js';
 import { Desempenho } from './pages/Desempenho.js';
+import { MeusGrupos } from './pages/MeusGrupos.js';
 import { Nichos } from './pages/Nichos.js';
 import { Produtos } from './pages/Produtos.js';
 import { Agenda } from './pages/Agenda.js';
@@ -84,6 +85,7 @@ export default function App() {
         <Route path="/" element={<VisaoGeral />} />
         <Route path="/fila" element={<Fila />} />
         <Route path="/desempenho" element={<Desempenho />} />
+        <Route path="/grupos" element={<MeusGrupos />} />
         <Route path="/produtos" element={<Produtos />} />
         <Route path="/nichos" element={<Nichos />} />
         <Route path="/agenda" element={<Agenda />} />

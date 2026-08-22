@@ -24,7 +24,13 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
       { to: '/templates', label: 'Modelos' },
     ],
   },
-  { label: 'Métricas', items: [{ to: '/desempenho', label: 'Desempenho' }] },
+  {
+    label: 'Métricas',
+    items: [
+      { to: '/desempenho', label: 'Desempenho' },
+      { to: '/grupos', label: 'Meus Grupos' },
+    ],
+  },
   { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
 ];
 

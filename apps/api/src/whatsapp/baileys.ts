@@ -152,6 +152,39 @@ class WhatsAppService {
         }
       }
     });
+
+    // Entrada/saida de membro em qualquer grupo. So `add`/`remove` sao
+    // movimento de membro de verdade -- `promote`/`demote` sao mudanca de
+    // admin, nao entram no log (ver doc do model GroupMemberEvent).
+    //
+    // Handler roda dentro do socket do Baileys: qualquer excecao aqui pode
+    // derrubar a conexao usada pra enviar oferta, por isso tudo dentro de
+    // try/catch e nada relancado.
+    this.sock.ev.on('group-participants.update', async (update) => {
+      try {
+        const { id: groupJid, participants, action } = update;
+        if (action !== 'add' && action !== 'remove') return;
+
+        const delta = action === 'add' ? participants.length : -participants.length;
+        await prisma.$transaction([
+          prisma.groupMemberEvent.createMany({
+            data: participants.map((participant) => ({
+              groupJid,
+              participant,
+              action: action === 'add' ? 'ADD' : 'REMOVE',
+            })),
+          }),
+          // increment/decrement atomico -- sem findUnique + soma na mao, pra
+          // nao perder update se um syncGroups() completo rodar junto.
+          prisma.whatsappGroup.updateMany({
+            where: { jid: groupJid },
+            data: { memberCount: { increment: delta } },
+          }),
+        ]);
+      } catch (err) {
+        logger.error({ err: String(err) }, 'falha ao registrar entrada/saida de grupo');
+      }
+    });
   }
 
   /**
@@ -206,10 +239,11 @@ class WhatsAppService {
     if (!this.sock) return;
     const groups = await this.sock.groupFetchAllParticipating();
     for (const [jid, meta] of Object.entries(groups)) {
+      const memberCount = meta.participants.length;
       await prisma.whatsappGroup.upsert({
         where: { jid },
-        create: { jid, name: meta.subject },
-        update: { name: meta.subject },
+        create: { jid, name: meta.subject, memberCount },
+        update: { name: meta.subject, memberCount },
       });
     }
     logger.info({ count: Object.keys(groups).length }, 'grupos sincronizados');
