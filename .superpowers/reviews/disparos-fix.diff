@@ -1,0 +1,908 @@
+0235e4f fix(disparos): claim antes de enviar, erros retryable nao queimam disparo
+---
+ apps/api/src/routes/disparos.ts  |  19 ++++-
+ apps/api/src/services/disparo.ts | 150 +++++++++++++++++++++++++++++++++------
+ apps/api/src/whatsapp/baileys.ts |  17 ++++-
+ apps/web/src/pages/Disparos.tsx  |  75 +++++++++++++++++---
+ 4 files changed, 225 insertions(+), 36 deletions(-)
+---
+diff --git a/apps/api/src/routes/disparos.ts b/apps/api/src/routes/disparos.ts
+index a551ea6..b242609 100644
+--- a/apps/api/src/routes/disparos.ts
++++ b/apps/api/src/routes/disparos.ts
+@@ -1,37 +1,52 @@
+ import type { FastifyInstance } from 'fastify';
+ import { z } from 'zod';
+ import { prisma } from '../db.js';
+ import { criarDisparo, cancelarDisparo } from '../services/disparo.js';
+ 
+ const corpoDisparo = z
+   .object({
+-    offerIds: z.array(z.string().min(1)).min(1, 'Escolha ao menos uma oferta.'),
++    // Dedupe aqui, nao so na UI: ["G1","G1"] geraria dois pares (oferta,
++    // grupo) identicos e mandaria a mesma mensagem duas vezes pro mesmo
++    // grupo. Simetrico pra offerIds pelo mesmo motivo.
++    offerIds: z
++      .array(z.string().min(1))
++      .min(1, 'Escolha ao menos uma oferta.')
++      .transform((a) => [...new Set(a)]),
+     templateId: z.string().min(1, 'Escolha um modelo de mensagem.'),
+-    groupJids: z.array(z.string().min(1)).min(1, 'Escolha ao menos um grupo de destino.'),
++    groupJids: z
++      .array(z.string().min(1))
++      .min(1, 'Escolha ao menos um grupo de destino.')
++      .transform((a) => [...new Set(a)]),
+     startNow: z.boolean(),
+     scheduledFor: z.string().datetime().optional(),
+     // Piso de 5min e regra de negocio, nao so de UI -- e o que impede um
+     // disparo de virar rajada mesmo se alguem forcar a chamada da API.
+     intervalMinutes: z.number().int().min(5, 'O intervalo minimo e 5 minutos.'),
+     avoidNightHours: z.boolean().default(true),
+     avoidWeekends: z.boolean().default(false),
+     skipExpiredOffers: z.boolean().default(false),
+   })
+   .refine((b) => b.startNow || b.scheduledFor, {
+     message: 'Escolha "Agora" ou uma data para agendar.',
+     path: ['scheduledFor'],
++  })
++  .refine((b) => b.startNow || new Date(b.scheduledFor!).getTime() > Date.now(), {
++    // Uma data no passado faz todo item nascer "vencido" e o disparo drenar
++    // a fila inteira de uma vez -- ver o gate de intervalMinutes em disparo.ts.
++    message: 'A data agendada precisa ser no futuro.',
++    path: ['scheduledFor'],
+   });
+ 
+ function progresso(items: { status: string }[]) {
+   const total = items.length;
+   const enviados = items.filter((i) => i.status === 'SENT').length;
+   const falharam = items.filter((i) => i.status === 'FAILED').length;
+   return { total, enviados, falharam, pendentes: total - enviados - falharam };
+ }
+ 
+ /** Ultimo horario ainda pendente -- serve de estimativa de termino. */
+ function estimativaFim(items: { status: string; scheduledFor: Date }[]) {
+   const pendentes = items.filter((i) => i.status === 'PENDING');
+   if (!pendentes.length) return null;
+   return pendentes.reduce((max, i) => (i.scheduledFor > max ? i.scheduledFor : max), pendentes[0].scheduledFor);
+ }
+diff --git a/apps/api/src/services/disparo.ts b/apps/api/src/services/disparo.ts
+index fafb861..bfe154b 100644
+--- a/apps/api/src/services/disparo.ts
++++ b/apps/api/src/services/disparo.ts
+@@ -1,22 +1,28 @@
+ import { DisparoStatus, DisparoItemStatus, OfferStatus } from '@prisma/client';
+ import { prisma, num } from '../db.js';
+ import { logger } from '../lib/logger.js';
+ import { sendOffer } from './dispatch.js';
+ import { renderTemplate } from './template.js';
++import { WhatsAppRetryableError } from '../whatsapp/baileys.js';
+ 
+ const MINUTE_MS = 60_000;
++// Teto diario nao reseta antes da virada do dia e uma reconexao do WhatsApp
++// costuma levar segundos a poucos minutos -- 30min evita tanto martelar a
++// cada tick (o bug que isso corrige) quanto travar o disparo por horas numa
++// reconexao rapida.
++const RETRY_DELAY_MINUTES = 30;
+ 
+ export interface CriarDisparoInput {
+   offerIds: string[];
+   templateId: string;
+   groupJids: string[];
+   startNow: boolean;
+   scheduledFor?: string;
+   intervalMinutes: number;
+   avoidNightHours: boolean;
+   avoidWeekends: boolean;
+   skipExpiredOffers: boolean;
+ }
+ 
+ /**
+  * Cria o disparo e ja reserva as ofertas escolhidas (PENDING -> DISPATCHING),
+@@ -53,80 +59,107 @@ export async function criarDisparo(input: CriarDisparoInput) {
+         startAt,
+         intervalMinutes: input.intervalMinutes,
+         avoidNightHours: input.avoidNightHours,
+         avoidWeekends: input.avoidWeekends,
+         skipExpiredOffers: input.skipExpiredOffers,
+         items: {
+           create: pares.map((p, i) => ({
+             offerId: p.offerId,
+             groupJid: p.groupJid,
+             scheduledFor: new Date(startAt.getTime() + i * input.intervalMinutes * MINUTE_MS),
+           })),
+         },
+       },
+       include: { items: true, template: true },
+     });
+-    await tx.offer.updateMany({
+-      where: { id: { in: input.offerIds } },
++    // Filtra por PENDING de novo aqui dentro (nao so no findMany la em cima):
++    // entre a leitura e esta escrita, outro criarDisparo concorrente pode ter
++    // reservado a mesma oferta. So esta updateMany e atomica o bastante pra
++    // pegar isso -- se sobrar oferta que nao virou DISPATCHING, alguem chegou
++    // primeiro, e o throw derruba a transacao inteira (nao cria o disparo
++    // pela metade nem forca de volta uma oferta que virou SENT nesse meio-tempo).
++    const reservadas = await tx.offer.updateMany({
++      where: { id: { in: input.offerIds }, status: OfferStatus.PENDING },
+       data: { status: OfferStatus.DISPATCHING },
+     });
++    if (reservadas.count !== input.offerIds.length) {
++      throw new Error('Alguma oferta escolhida ja nao esta mais pendente -- atualize a lista.');
++    }
+     return disparo;
+   });
+ }
+ 
+ /**
+  * Cancela o disparo: os itens que ainda nao saíram viram FAILED (com motivo
+- * "Disparo cancelado"), e SO as ofertas que ainda estavam DISPATCHING voltam
+- * pra PENDING (Fila). Uma oferta que ja saiu pra pelo menos um grupo ja
+- * esta SENT (sendOffer marca isso no primeiro envio) -- essa nao volta:
+- * nao da pra desenviar uma mensagem de WhatsApp, e reaparecer na Fila
++ * "Disparo cancelado"), e as ofertas voltam pra PENDING (Fila) em dois casos:
++ * as que ainda estavam DISPATCHING (nunca tentaram sair), e as que estao
++ * FAILED sem nenhum DisparoItem SENT neste disparo (tentaram e todo envio
++ * falhou -- sem isso ficam presas em FAILED, invisiveis em toda pagina do
++ * app). Uma oferta que ja saiu pra pelo menos um grupo fica SENT e essa nao
++ * volta: nao da pra desenviar uma mensagem de WhatsApp, e reaparecer na Fila
+  * sugeriria que ela nunca saiu.
+  */
+ export async function cancelarDisparo(id: string) {
+   const disparo = await prisma.disparo.findUnique({ where: { id }, include: { items: true } });
+   if (!disparo) throw new Error('Disparo nao encontrado.');
+   if (disparo.status === DisparoStatus.CANCELLED || disparo.status === DisparoStatus.DONE) {
+     throw new Error('Esse disparo ja terminou -- nao da pra cancelar.');
+   }
+ 
+   const pendentes = disparo.items.filter((i) => i.status === DisparoItemStatus.PENDING);
+-  const offerIds = [...new Set(pendentes.map((i) => i.offerId))];
++  const dispatchingIds = [...new Set(pendentes.map((i) => i.offerId))];
++
++  const sentOfferIds = new Set(
++    disparo.items.filter((i) => i.status === DisparoItemStatus.SENT).map((i) => i.offerId),
++  );
++  const failedOfferIds = [...new Set(disparo.items.filter((i) => i.status === DisparoItemStatus.FAILED).map((i) => i.offerId))];
++  const failedSemSent = failedOfferIds.filter((oid) => !sentOfferIds.has(oid));
+ 
+   await prisma.$transaction([
+     prisma.disparoItem.updateMany({
+       where: { disparoId: id, status: DisparoItemStatus.PENDING },
+       data: { status: DisparoItemStatus.FAILED, failReason: 'Disparo cancelado.' },
+     }),
+     prisma.offer.updateMany({
+-      where: { id: { in: offerIds }, status: OfferStatus.DISPATCHING },
++      where: { id: { in: dispatchingIds }, status: OfferStatus.DISPATCHING },
+       data: { status: OfferStatus.PENDING },
+     }),
++    prisma.offer.updateMany({
++      where: { id: { in: failedSemSent }, status: OfferStatus.FAILED },
++      data: { status: OfferStatus.PENDING, failReason: null },
++    }),
+     prisma.disparo.update({
+       where: { id },
+       data: { status: DisparoStatus.CANCELLED, cancelledAt: new Date() },
+     }),
+   ]);
+ }
+ 
++// Hoisted pro modulo: proximoLiberado chama bloqueado() minuto a minuto (ate
++// ~3300x no pior caso), e construir um Intl.DateTimeFormat novo a cada volta
++// e desperdicio -- a formatacao em si (formatToParts) ja recebe o `t` de cada
++// chamada, o formatter e reutilizavel.
++const fusoSaoPaulo = new Intl.DateTimeFormat('en-GB', {
++  timeZone: 'America/Sao_Paulo',
++  hourCycle: 'h23',
++  hour: '2-digit',
++  weekday: 'short',
++});
++
+ /** Horario (America/Sao_Paulo) ou dia da semana bloqueiam o envio agora? */
+ function bloqueado(t: Date, avoidNightHours: boolean, avoidWeekends: boolean): boolean {
+-  const partes = new Intl.DateTimeFormat('en-GB', {
+-    timeZone: 'America/Sao_Paulo',
+-    hourCycle: 'h23',
+-    hour: '2-digit',
+-    weekday: 'short',
+-  }).formatToParts(t);
++  const partes = fusoSaoPaulo.formatToParts(t);
+   const hora = Number(partes.find((p) => p.type === 'hour')?.value ?? '0');
+   const diaSemana = partes.find((p) => p.type === 'weekday')?.value;
+ 
+   if (avoidNightHours && (hora >= 23 || hora < 6)) return true;
+   if (avoidWeekends && (diaSemana === 'Sat' || diaSemana === 'Sun')) return true;
+   return false;
+ }
+ 
+ /**
+  * Proximo instante liberado, andando minuto a minuto ate sair das janelas
+  * bloqueadas. Pior caso (sexta 23h com as duas guardas ligadas) sao uns
+  * 3300 minutos ate segunda 06h -- calculo puro, sem I/O, nao pesa nem nesse
+  * extremo.
+  */
+ function proximoLiberado(de: Date, avoidNightHours: boolean, avoidWeekends: boolean): Date {
+@@ -140,44 +173,50 @@ function proximoLiberado(de: Date, avoidNightHours: boolean, avoidWeekends: bool
+ }
+ 
+ /**
+  * Adia este item e todos os que vem depois dele no mesmo disparo (ainda
+  * pendentes), recomecando a contagem do intervalo a partir do proximo
+  * horario liberado.
+  *
+  * Por que a cauda inteira, e nao so este item: se so este item fosse adiado
+  * pro exato instante em que a janela reabre, e os de depois continuassem
+  * com o scheduledFor original (que tambem ja passou, porque a janela
+  * bloqueada emperrou todos igual), TODOS ficariam "vencidos" ao mesmo tempo
+  * -- o worker mandaria todos juntos no primeiro tick apos a janela reabrir.
+  * Isso e exatamente a rajada que o intervalo minimo existe pra evitar.
+  * Recalculando a cauda inteira a partir do novo inicio, o espacamento
+  * configurado se mantem intacto -- so desliza no tempo, nunca comprime.
++ *
++ * `atrasoMs` desloca o ponto de partida antes de procurar o proximo horario
++ * liberado -- usado no retry de erro retryable (teto diario / desconectado),
++ * pra nao recalcular a cauda pra "agora" (que so bateria de novo na mesma
++ * falha no proximo tick).
+  */
+ async function adiar(
+   item: { disparoId: string; scheduledFor: Date },
+   disparo: { intervalMinutes: number; avoidNightHours: boolean; avoidWeekends: boolean },
++  atrasoMs = 0,
+ ) {
+   const cauda = await prisma.disparoItem.findMany({
+     where: {
+       disparoId: item.disparoId,
+       status: DisparoItemStatus.PENDING,
+       scheduledFor: { gte: item.scheduledFor },
+     },
+     orderBy: { scheduledFor: 'asc' },
+   });
+-  const inicio = proximoLiberado(new Date(), disparo.avoidNightHours, disparo.avoidWeekends);
++  const inicio = proximoLiberado(new Date(Date.now() + atrasoMs), disparo.avoidNightHours, disparo.avoidWeekends);
+ 
+   await prisma.$transaction(
+     cauda.map((it, i) =>
+       prisma.disparoItem.update({
+         where: { id: it.id },
+         data: { scheduledFor: new Date(inicio.getTime() + i * disparo.intervalMinutes * MINUTE_MS) },
+       }),
+     ),
+   );
+ }
+ 
+ function dadosTemplate(offer: {
+   price: unknown;
+   comparePrice: unknown;
+   couponCode: string | null;
+@@ -194,77 +233,142 @@ function dadosTemplate(offer: {
+ }
+ 
+ /**
+  * Roda pelo cron a cada minuto (workers/index.ts). Manda no maximo um item
+  * por disparo por rodada -- o espacamento entre os proximos ja vem certo no
+  * scheduledFor calculado na criacao (ou reajustado por adiar()), entao nao
+  * precisa mandar mais de um por vez pra respeitar o intervalo.
+  *
+  * Reentrancia: trava em memoria de processo unico (`rodando`). sendOffer em
+  * si ja serializa qualquer envio real por baixo (whatsapp/baileys.ts usa um
+  * lock proprio), mas sem essa trava aqui duas rodadas do cron sobrepostas
+  * poderiam ler o MESMO item PENDING antes de qualquer uma marca-lo SENT, e
+  * as duas chamariam sendOffer pro mesmo par (oferta, grupo) -- mensagem
+  * duplicada. So funciona com uma instancia da API rodando, que e o caso
+  * hoje; com mais de um processo precisaria de lock no banco.
++ *
++ * Ordem claim-antes-de-enviar: reservamos o item (PENDING -> SENT) ANTES de
++ * chamar sendOffer, nao depois. Se o processo cair (deploy, restart, OOM) ou
++ * o proprio UPDATE de "marcar enviado" falhar (pool esgotado, erro de rede
++ * no banco) DEPOIS do envio de verdade, o item antigo ficava PENDING e era
++ * reenviado no proximo tick -- repetidamente, pra um numero que pode ser
++ * banido. Com a reserva vindo primeiro, o pior caso vira o oposto: o envio
++ * falha meio do caminho e o item fica marcado SENT sem ter saido de fato
++ * (envio perdido, nao reenviado). Perder um envio ocasional e aceitavel;
++ * reenviar em loop pro grupo errado numero de vezes nao e -- essa e a troca
++ * deliberada aqui.
+  */
+ let rodando = false;
+ export async function runDisparos() {
+   if (rodando) return;
+   rodando = true;
+   try {
+     const due = await prisma.disparoItem.findMany({
+       where: {
+         status: DisparoItemStatus.PENDING,
+         scheduledFor: { lte: new Date() },
+         disparo: { status: { in: [DisparoStatus.DRAFT, DisparoStatus.SENDING] } },
+       },
+       orderBy: { scheduledFor: 'asc' },
+       take: 5,
+       include: {
+         disparo: { include: { template: true } },
+         offer: { include: { product: true } },
+       },
+     });
+ 
+     const processados = new Set<string>();
+     for (const item of due) {
+       if (processados.has(item.disparoId)) continue;
+       processados.add(item.disparoId);
+ 
+       const { disparo } = item;
+-      if (disparo.status === DisparoStatus.DRAFT) {
+-        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.SENDING } });
+-      }
+ 
+       if (bloqueado(new Date(), disparo.avoidNightHours, disparo.avoidWeekends)) {
+         await adiar(item, disparo);
+         continue;
+       }
+ 
++      // Pacing por disparo: se o startAt caiu no passado (ou o disparo ficou
++      // parado numa janela bloqueada), varios itens ficam "vencidos" de uma
++      // vez. Sem essa checagem, cada tick manda o proximo vencido -- um por
++      // minuto, bem mais rapido que o intervalMinutes configurado. So manda
++      // de novo quando ja passou intervalMinutes desde o ultimo envio deste
++      // disparo.
++      const ultimoEnvio = await prisma.disparoItem.findFirst({
++        where: { disparoId: disparo.id, status: DisparoItemStatus.SENT },
++        orderBy: { sentAt: 'desc' },
++      });
++      if (ultimoEnvio?.sentAt && Date.now() - ultimoEnvio.sentAt.getTime() < disparo.intervalMinutes * MINUTE_MS) {
++        continue;
++      }
++
++      // So flipa DRAFT -> SENDING quando o trabalho de fato comeca -- antes
++      // disso (bloqueado ou aguardando pacing) o disparo ainda nao mandou
++      // nada, e "enviando" seria mentira por horas numa janela bloqueada.
++      if (disparo.status === DisparoStatus.DRAFT) {
++        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.SENDING } });
++      }
++
++      // Reserva atomica: so entra quem ainda achar o item PENDING. Se outra
++      // rodada (ou um cancelamento) ja mexeu nele, count fica 0 e pulamos --
++      // sem isso duas rodadas sobrepostas mandariam a mesma mensagem duas vezes.
++      const claim = await prisma.disparoItem.updateMany({
++        where: { id: item.id, status: DisparoItemStatus.PENDING },
++        data: { status: DisparoItemStatus.SENT, sentAt: new Date() },
++      });
++      if (claim.count !== 1) continue;
++
+       try {
+         const texto = renderTemplate(disparo.template.body, dadosTemplate(item.offer), disparo.template.ctas);
+         await sendOffer(item.offerId, item.groupJid, { message: texto, allowResend: true });
+-        await prisma.disparoItem.update({
+-          where: { id: item.id },
+-          data: { status: DisparoItemStatus.SENT, sentAt: new Date() },
+-        });
++        // Sucesso: o claim acima ja gravou SENT/sentAt, nada mais a fazer.
+       } catch (err) {
++        if (err instanceof WhatsAppRetryableError) {
++          // Retryable (teto diario ou desconectado): desfaz a reserva --
++          // volta o item pra PENDING -- e adia a cauda inteira pro retry, em
++          // vez de queimar o item e a oferta como se fosse erro definitivo.
++          // dispatch.ts (sendOffer) ja marcou a OFERTA como FAILED no catch
++          // dele antes de repassar o erro; aqui desfazemos isso tambem,
++          // porque a oferta continua "em disparo" de verdade, so adiada.
++          await prisma.disparoItem.updateMany({
++            where: { id: item.id, status: DisparoItemStatus.SENT },
++            data: { status: DisparoItemStatus.PENDING, sentAt: null },
++          });
++          await prisma.offer.updateMany({
++            where: { id: item.offerId, status: OfferStatus.FAILED },
++            data: { status: OfferStatus.DISPATCHING, failReason: null },
++          });
++          logger.warn(
++            { disparoId: disparo.id, itemId: item.id, motivo: err.message },
++            'envio de disparo adiado (falha retryable)',
++          );
++          await adiar(item, disparo, RETRY_DELAY_MINUTES * MINUTE_MS);
++          continue;
++        }
++
+         const failReason = err instanceof Error ? err.message : 'erro desconhecido';
+         logger.error({ disparoId: disparo.id, itemId: item.id, failReason }, 'envio de disparo falhou');
+         await prisma.disparoItem.update({
+           where: { id: item.id },
+           data: { status: DisparoItemStatus.FAILED, failReason },
+         });
+       }
+ 
+       const restam = await prisma.disparoItem.count({
+         where: { disparoId: disparo.id, status: DisparoItemStatus.PENDING },
+       });
+       if (restam === 0) {
+-        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.DONE } });
++        // updateMany com o status como parte do where: se um cancelamento
++        // concorrente ja levou o disparo pra CANCELLED enquanto este ultimo
++        // envio estava em voo, essa checagem impede reescrever por cima com
++        // DONE e apagar o fato de que foi cancelado.
++        await prisma.disparo.updateMany({
++          where: { id: disparo.id, status: { in: [DisparoStatus.DRAFT, DisparoStatus.SENDING] } },
++          data: { status: DisparoStatus.DONE },
++        });
+       }
+     }
+   } finally {
+     rodando = false;
+   }
+ }
+diff --git a/apps/api/src/whatsapp/baileys.ts b/apps/api/src/whatsapp/baileys.ts
+index a49864b..c3c07f9 100644
+--- a/apps/api/src/whatsapp/baileys.ts
++++ b/apps/api/src/whatsapp/baileys.ts
+@@ -62,30 +62,43 @@ async function gerarPreviewImagem(sock: WASocket, url: string): Promise<Record<s
+  * PODE SER BANIDO, e o ban costuma ser permanente.
+  *
+  * Como reduzir (nao zerar) o risco:
+  *   - use um chip secundario, nunca o seu numero pessoal;
+  *   - deixe o numero "esquentar" por alguns dias com uso normal antes;
+  *   - respeite WA_MIN_INTERVAL_SECONDS e WA_DAILY_CAP (padrao 90s / 40 por dia);
+  *   - varie o texto: mensagens identicas em sequencia sao o padrao classico de
+  *     spam e o que mais gera denuncia;
+  *   - o que realmente derruba numero e denuncia de usuario. Grupo com opt-in
+  *     e volume moderado aguenta; disparo em massa nao.
+  * =====================================================================
+  */
+ 
+ type Status = 'disconnected' | 'connecting' | 'qr' | 'connected';
+ 
++/**
++ * Falha rotineira que some sozinha: teto diario ainda nao resetou, ou o
++ * numero esta reconectando. Quem chama sendOffer (o worker de Disparos) usa
++ * `instanceof` pra distinguir isso de um erro de verdade -- string matching
++ * em mensagem de erro quebraria silenciosamente se o texto mudasse.
++ */
++export class WhatsAppRetryableError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = 'WhatsAppRetryableError';
++  }
++}
++
+ class WhatsAppService {
+   private sock: WASocket | null = null;
+   private lastSentAt = 0;
+   // Sem isso, um clique manual e o agendador/automacao podem cair no mesmo
+   // instante: os dois passam pela checagem de teto/intervalo antes de
+   // qualquer um incrementar o contador, e o limite anti-ban estoura.
+   private readonly lock = createMutex();
+   status: Status = 'disconnected';
+   qrDataUrl: string | null = null;
+   me: string | null = null;
+ 
+   async connect(): Promise<void> {
+     if (this.status === 'connecting' || this.status === 'connected') return;
+     this.status = 'connecting';
+     this.qrDataUrl = null;
+@@ -198,31 +211,31 @@ class WhatsAppService {
+         create: { jid, name: meta.subject },
+         update: { name: meta.subject },
+       });
+     }
+     logger.info({ count: Object.keys(groups).length }, 'grupos sincronizados');
+   }
+ 
+   private async checkQuota() {
+     const day = new Date().toISOString().slice(0, 10);
+     const log = await prisma.sendLog.upsert({
+       where: { day },
+       create: { day, count: 0 },
+       update: {},
+     });
+     if (log.count >= env.wa.dailyCap) {
+-      throw new Error(
++      throw new WhatsAppRetryableError(
+         `Teto diario de ${env.wa.dailyCap} envios atingido. Isso e proposital: passar disso e o caminho mais rapido pro ban.`,
+       );
+     }
+     return day;
+   }
+ 
+   private async waitInterval() {
+     const gap = Date.now() - this.lastSentAt;
+     const min = env.wa.minIntervalSeconds * 1000;
+     if (this.lastSentAt && gap < min) {
+       // Jitter de ate 20s pra evitar cadencia robotica perfeita.
+       const wait = min - gap + Math.random() * 20_000;
+       logger.info({ waitMs: Math.round(wait) }, 'aguardando intervalo entre envios');
+       await new Promise((r) => setTimeout(r, wait));
+     }
+@@ -240,31 +253,31 @@ class WhatsAppService {
+    *
+    * `preview` e opcional so pra nao quebrar quem manda texto sem produto
+    * associado; toda oferta de verdade tem foto e vai com ela.
+    */
+   async sendOffer(
+     jid: string,
+     text: string,
+     preview?: { title: string; link: string; imageUrl?: string | null },
+   ): Promise<string> {
+     // Todo o envio (checagem de teto, intervalo, digitando, mandar, contar)
+     // roda como bloco unico: e o que impede duas chamadas concorrentes
+     // (clique manual + agendador + automacao) de passar juntas pela mesma
+     // checagem antes de qualquer uma contar o proprio envio.
+     return this.lock(async () => {
+       if (!this.sock || this.status !== 'connected') {
+-        throw new Error('WhatsApp desconectado. Pareie o numero em Conexoes.');
++        throw new WhatsAppRetryableError('WhatsApp desconectado. Pareie o numero em Conexoes.');
+       }
+ 
+       const day = await this.checkQuota();
+       await this.waitInterval();
+ 
+       // "Digitando..." antes de enviar deixa o comportamento mais proximo do humano.
+       await this.sock.presenceSubscribe(jid).catch(() => undefined);
+       await this.sock.sendPresenceUpdate('composing', jid).catch(() => undefined);
+       await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1800));
+       await this.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
+ 
+       // Passar `linkPreview` explicito -- mesmo sem thumbnail -- e o que faz o
+       // Baileys pular a tentativa automatica dele, que sempre falha aqui (ver
+       // gerarPreviewImagem). undefined so quando preview nem foi passado.
+       //
+diff --git a/apps/web/src/pages/Disparos.tsx b/apps/web/src/pages/Disparos.tsx
+index ba3c801..b873f23 100644
+--- a/apps/web/src/pages/Disparos.tsx
++++ b/apps/web/src/pages/Disparos.tsx
+@@ -2,30 +2,35 @@ import { useEffect, useState } from 'react';
+ import { api, brl, STORE, type Offer } from '../api.js';
+ 
+ interface TemplateLite {
+   id: string;
+   name: string;
+   body: string;
+   ctas: string[];
+ }
+ 
+ interface Grupo {
+   jid: string;
+   name: string;
+   isDefault: boolean;
+ }
+ 
++interface Quota {
++  used: number;
++  cap: number;
++}
++
+ interface DisparoResumo {
+   id: string;
+   status: 'DRAFT' | 'SENDING' | 'DONE' | 'CANCELLED';
+   templateId: string;
+   templateName: string | null;
+   groupJids: string[];
+   startAt: string;
+   intervalMinutes: number;
+   avoidNightHours: boolean;
+   avoidWeekends: boolean;
+   skipExpiredOffers: boolean;
+   createdAt: string;
+   cancelledAt: string | null;
+   total: number;
+   enviados: number;
+@@ -45,30 +50,36 @@ interface DisparoItemDetalhe {
+   failReason: string | null;
+ }
+ 
+ const STATUS_LABEL: Record<DisparoResumo['status'], string> = {
+   DRAFT: 'aguardando início',
+   SENDING: 'enviando',
+   DONE: 'concluído',
+   CANCELLED: 'cancelado',
+ };
+ 
+ function fmt(iso: string | null) {
+   if (!iso) return '—';
+   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+ }
+ 
++/** Agora, no fuso local, no formato que <input type="datetime-local" min> espera. */
++function proximoMinutoLocal(): string {
++  const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60_000);
++  return d.toISOString().slice(0, 16);
++}
++
+ const PASSOS = ['Ofertas', 'Mensagem', 'Destinos'];
+ 
+ export function Disparos() {
+   const [tab, setTab] = useState<'novo' | 'andamento'>('novo');
+ 
+   return (
+     <>
+       <div className="head">
+         <div>
+           <h1>Disparos</h1>
+           <p>
+             Manda um lote de ofertas pra um ou mais grupos, espaçadas no tempo — sem rajada. Cada oferta sai uma
+             vez por grupo escolhido, no intervalo que você definir.
+           </p>
+         </div>
+@@ -79,65 +90,72 @@ export function Disparos() {
+           Novo disparo
+         </button>
+         <button className="tabs__item" data-on={tab === 'andamento'} onClick={() => setTab('andamento')}>
+           Em andamento
+         </button>
+       </div>
+ 
+       {tab === 'novo' ? <NovoDisparo onCriado={() => setTab('andamento')} /> : <EmAndamento />}
+     </>
+   );
+ }
+ 
+ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
+   const [step, setStep] = useState(1);
+ 
++  const OFFERS_LIMIT = 500;
+   const [offers, setOffers] = useState<Offer[]>([]);
++  const [offersTruncated, setOffersTruncated] = useState(false);
+   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
+   const [loadingOffers, setLoadingOffers] = useState(true);
+ 
+   const [templates, setTemplates] = useState<TemplateLite[]>([]);
+   const [templateId, setTemplateId] = useState('');
+   const [preview, setPreview] = useState('');
+ 
+   const [grupos, setGrupos] = useState<Grupo[]>([]);
+   const [groupJids, setGroupJids] = useState<Set<string>>(new Set());
++  const [quota, setQuota] = useState<Quota | null>(null);
+   const [quando, setQuando] = useState<'agora' | 'agendar'>('agora');
+   const [agendadoPara, setAgendadoPara] = useState('');
+   const [intervalMinutes, setIntervalMinutes] = useState(5);
+   const [avoidNightHours, setAvoidNightHours] = useState(true);
+   const [avoidWeekends, setAvoidWeekends] = useState(false);
+   const [skipExpiredOffers, setSkipExpiredOffers] = useState(false);
+ 
+   const [criando, setCriando] = useState(false);
+   const [erro, setErro] = useState<string | null>(null);
+ 
+   useEffect(() => {
+     setLoadingOffers(true);
+     api
+-      .get<Offer[]>('/api/offers?status=PENDING')
++      .get<Offer[]>(`/api/offers?status=PENDING&limit=${OFFERS_LIMIT}`)
+       .then((os) => {
+         setOffers(os);
++        setOffersTruncated(os.length >= OFFERS_LIMIT);
+         setSelecionadas(new Set(os.map((o) => o.id)));
+       })
+       .catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar a fila.'))
+       .finally(() => setLoadingOffers(false));
+ 
+     api.get<TemplateLite[]>('/api/templates').then(setTemplates).catch(() => {});
+     api
+-      .get<{ groups: Grupo[] }>('/api/whatsapp/status')
+-      .then((r) => setGrupos(r.groups ?? []))
++      .get<{ groups: Grupo[]; quota: Quota }>('/api/whatsapp/status')
++      .then((r) => {
++        setGrupos(r.groups ?? []);
++        setQuota(r.quota ?? null);
++      })
+       .catch(() => {});
+   }, []);
+ 
+   // Pré-visualização acompanha o modelo escolhido.
+   useEffect(() => {
+     const t = templates.find((x) => x.id === templateId);
+     if (!t) return setPreview('');
+     api
+       .post<{ text: string }>('/api/templates/preview', { body: t.body, ctas: t.ctas })
+       .then((r) => setPreview(r.text))
+       .catch(() => setPreview(''));
+   }, [templateId, templates]);
+ 
+   function alternarOferta(id: string) {
+     setSelecionadas((prev) => {
+@@ -206,30 +224,35 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
+               {n < PASSOS.length && <span className="steps__sep" />}
+             </div>
+           );
+         })}
+       </div>
+ 
+       {erro && <div className="notice">{erro}</div>}
+ 
+       {step === 1 && (
+         <>
+           <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
+             {loadingOffers
+               ? 'Carregando a fila...'
+               : `${selecionadas.size} de ${offers.length} oferta(s) selecionada(s).`}
+           </p>
++          {offersTruncated && (
++            <div className="notice" data-tone="warn" style={{ marginBottom: 10 }}>
++              A fila tem mais de {OFFERS_LIMIT} ofertas pendentes — mostrando só as {OFFERS_LIMIT} primeiras.
++            </div>
++          )}
+           {!loadingOffers && offers.length === 0 && (
+             <div className="empty">
+               <strong>Fila vazia</strong>
+               Não há ofertas pendentes pra colocar num disparo.
+             </div>
+           )}
+           {offers.length > 0 && (
+             <>
+               <div className="row" style={{ marginBottom: 10 }}>
+                 <button className="btn btn--ghost btn--sm" onClick={() => setSelecionadas(new Set(offers.map((o) => o.id)))}>
+                   Marcar todas
+                 </button>
+                 <button className="btn btn--ghost btn--sm" onClick={() => setSelecionadas(new Set())}>
+                   Desmarcar todas
+                 </button>
+@@ -365,41 +388,44 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
+                   data-tone={quando === 'agendar' ? 'on' : 'off'}
+                   style={{ cursor: 'pointer', background: 'none' }}
+                   onClick={() => setQuando('agendar')}
+                 >
+                   Agendar
+                 </button>
+               </div>
+             </div>
+             {quando === 'agendar' && (
+               <div className="field" style={{ flex: '0 1 220px' }}>
+                 <label htmlFor="agendadoPara">Data/hora</label>
+                 <input
+                   id="agendadoPara"
+                   type="datetime-local"
+                   value={agendadoPara}
++                  min={proximoMinutoLocal()}
+                   onChange={(e) => setAgendadoPara(e.target.value)}
+                 />
+               </div>
+             )}
+             <div className="field" style={{ flex: '0 1 160px' }}>
+               <label htmlFor="intervalo">Intervalo (min)</label>
+               <input
+                 id="intervalo"
+-                inputMode="numeric"
++                type="number"
++                min={5}
+                 value={intervalMinutes}
+-                onChange={(e) => setIntervalMinutes(Math.max(5, Number(e.target.value) || 5))}
++                onChange={(e) => setIntervalMinutes(Number(e.target.value))}
++                onBlur={(e) => setIntervalMinutes(Math.max(5, Number(e.target.value) || 5))}
+               />
+               <small>mínimo 5 — um envio por vez, nunca rajada</small>
+             </div>
+           </div>
+ 
+           <div className="field" style={{ marginBottom: 16 }}>
+             <label>Guardas de segurança</label>
+             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                 <input
+                   type="checkbox"
+                   checked={avoidNightHours}
+                   onChange={(e) => setAvoidNightHours(e.target.checked)}
+                   style={{ width: 'auto' }}
+                 />
+@@ -427,97 +453,128 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
+               </label>
+             </div>
+           </div>
+ 
+           <div className="notice" data-tone="warn" style={{ marginBottom: 16 }}>
+             <strong>
+               {selecionadas.size} oferta{selecionadas.size === 1 ? '' : 's'} × {groupJids.size} grupo
+               {groupJids.size === 1 ? '' : 's'} = {totalEnvios} envio{totalEnvios === 1 ? '' : 's'}
+             </strong>
+             {fim && (
+               <>
+                 <br />
+                 Previsão de término: {fim.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+               </>
+             )}
++            {quota && (
++              <>
++                <br />
++                Teto diário: {quota.used}/{quota.cap} já usado hoje.
++                {totalEnvios > quota.cap - quota.used && (
++                  <> Esse disparo passa do teto — os envios excedentes ficam adiados até o teto liberar de novo.</>
++                )}
++              </>
++            )}
+           </div>
+ 
+           <div style={{ display: 'flex', gap: 8 }}>
+             <button className="btn btn--ghost" onClick={() => setStep(2)}>
+               Voltar
+             </button>
+             <button className="btn" disabled={criando || groupJids.size === 0 || totalEnvios === 0} onClick={() => void criar()}>
+               {criando ? 'Criando...' : 'Criar disparo'}
+             </button>
+           </div>
+         </>
+       )}
+     </div>
+   );
+ }
+ 
+ function EmAndamento() {
+   const [disparos, setDisparos] = useState<DisparoResumo[]>([]);
+   const [grupos, setGrupos] = useState<Grupo[]>([]);
+   const [loading, setLoading] = useState(true);
++  const [erro, setErro] = useState<string | null>(null);
+   const [expandido, setExpandido] = useState<string | null>(null);
+   const [itens, setItens] = useState<DisparoItemDetalhe[]>([]);
+   const [cancelando, setCancelando] = useState<string | null>(null);
+ 
+   async function carregar() {
+     setDisparos(await api.get<DisparoResumo[]>('/api/disparos'));
+   }
+ 
+   useEffect(() => {
+     setLoading(true);
+     Promise.all([
+       carregar(),
+       api.get<{ groups: Grupo[] }>('/api/whatsapp/status').then((r) => setGrupos(r.groups ?? [])),
+-    ]).finally(() => setLoading(false));
++    ])
++      // Sem isso, uma falha aqui renderiza o empty state "Nenhum disparo criado"
++      // -- mentira justo na pagina que voce usaria pra cancelar um disparo
++      // fugindo do controle.
++      .catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar os disparos.'))
++      .finally(() => setLoading(false));
+ 
+     // Progresso ao vivo: reconsulta enquanto essa aba estiver aberta.
+     const t = setInterval(() => void carregar().catch(() => {}), 8000);
+     return () => clearInterval(t);
+   }, []);
+ 
+   const nomeGrupo = (jid: string) => grupos.find((g) => g.jid === jid)?.name ?? jid;
+ 
+   async function alternarExpandido(id: string) {
+     if (expandido === id) {
+       setExpandido(null);
+       return;
+     }
+     setExpandido(id);
+-    const detalhe = await api.get<{ items: DisparoItemDetalhe[] }>(`/api/disparos/${id}`);
+-    setItens(detalhe.items);
++    // Limpa antes de buscar: sem isso, expandir o card B mostra por um
++    // instante (ou pra sempre, se a busca falhar) as linhas velhas do card A.
++    setItens([]);
++    try {
++      const detalhe = await api.get<{ items: DisparoItemDetalhe[] }>(`/api/disparos/${id}`);
++      setItens(detalhe.items);
++    } catch {
++      // fica vazio -- melhor que travar mostrando os itens de outro disparo
++    }
+   }
+ 
+   async function cancelar(id: string) {
+-    if (!confirm('Cancelar esse disparo? Os envios que ainda não saíram voltam pra fila; os que já saíram continuam enviados.')) return;
++    if (
++      !confirm(
++        'Cancelar esse disparo? Os envios que já saíram continuam enviados; as ofertas que ainda não saíram pra nenhum grupo voltam pra fila.',
++      )
++    )
++      return;
+     setCancelando(id);
+     try {
+       await api.post(`/api/disparos/${id}/cancelar`);
+       await carregar();
+     } catch (err) {
+       alert(err instanceof Error ? err.message : 'Não consegui cancelar.');
+     } finally {
+       setCancelando(null);
+     }
+   }
+ 
+   if (loading) return null;
+ 
++  if (erro) {
++    return <div className="notice">{erro}</div>;
++  }
++
+   if (disparos.length === 0) {
+     return (
+       <div className="empty">
+         <strong>Nenhum disparo criado</strong>
+         Vá em "Novo disparo" pra mandar um lote de ofertas pros seus grupos.
+       </div>
+     );
+   }
+ 
+   return (
+     <>
+       {disparos.map((d) => {
+         const pct = d.total ? Math.round(((d.enviados + d.falharam) / d.total) * 100) : 0;
+         const cancelavel = d.status === 'DRAFT' || d.status === 'SENDING';
+         return (
