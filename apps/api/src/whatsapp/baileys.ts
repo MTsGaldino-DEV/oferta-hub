@@ -11,6 +11,7 @@ import QRCode from 'qrcode';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
+import { createMutex } from '../lib/mutex.js';
 
 /**
  * Sobe a foto do produto pros servidores do WhatsApp e devolve os campos de
@@ -76,6 +77,10 @@ type Status = 'disconnected' | 'connecting' | 'qr' | 'connected';
 class WhatsAppService {
   private sock: WASocket | null = null;
   private lastSentAt = 0;
+  // Sem isso, um clique manual e o agendador/automacao podem cair no mesmo
+  // instante: os dois passam pela checagem de teto/intervalo antes de
+  // qualquer um incrementar o contador, e o limite anti-ban estoura.
+  private readonly lock = createMutex();
   status: Status = 'disconnected';
   qrDataUrl: string | null = null;
   me: string | null = null;
@@ -241,44 +246,50 @@ class WhatsAppService {
     text: string,
     preview?: { title: string; link: string; imageUrl?: string | null },
   ): Promise<string> {
-    if (!this.sock || this.status !== 'connected') {
-      throw new Error('WhatsApp desconectado. Pareie o numero em Conexoes.');
-    }
+    // Todo o envio (checagem de teto, intervalo, digitando, mandar, contar)
+    // roda como bloco unico: e o que impede duas chamadas concorrentes
+    // (clique manual + agendador + automacao) de passar juntas pela mesma
+    // checagem antes de qualquer uma contar o proprio envio.
+    return this.lock(async () => {
+      if (!this.sock || this.status !== 'connected') {
+        throw new Error('WhatsApp desconectado. Pareie o numero em Conexoes.');
+      }
 
-    const day = await this.checkQuota();
-    await this.waitInterval();
+      const day = await this.checkQuota();
+      await this.waitInterval();
 
-    // "Digitando..." antes de enviar deixa o comportamento mais proximo do humano.
-    await this.sock.presenceSubscribe(jid).catch(() => undefined);
-    await this.sock.sendPresenceUpdate('composing', jid).catch(() => undefined);
-    await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1800));
-    await this.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
+      // "Digitando..." antes de enviar deixa o comportamento mais proximo do humano.
+      await this.sock.presenceSubscribe(jid).catch(() => undefined);
+      await this.sock.sendPresenceUpdate('composing', jid).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1800));
+      await this.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
 
-    // Passar `linkPreview` explicito -- mesmo sem thumbnail -- e o que faz o
-    // Baileys pular a tentativa automatica dele, que sempre falha aqui (ver
-    // gerarPreviewImagem). undefined so quando preview nem foi passado.
-    //
-    // `title` fica um espaco (nao string vazia) de proposito: o titulo do
-    // produto ja e a primeira linha do texto da mensagem (ver renderMessage em
-    // services/message.ts) -- repetir no card so duplica. Testado com string
-    // vazia primeiro e o WhatsApp descarta o card inteiro (nem a foto aparece)
-    // quando title === ''; com um espaco em branco o card renderiza normal e
-    // o titulo fica invisivel, que e o efeito que queremos.
-    const linkPreview = preview
-      ? {
-          'canonical-url': preview.link,
-          'matched-text': preview.link,
-          title: ' ',
-          ...(preview.imageUrl ? await gerarPreviewImagem(this.sock, preview.imageUrl) : {}),
-        }
-      : undefined;
+      // Passar `linkPreview` explicito -- mesmo sem thumbnail -- e o que faz o
+      // Baileys pular a tentativa automatica dele, que sempre falha aqui (ver
+      // gerarPreviewImagem). undefined so quando preview nem foi passado.
+      //
+      // `title` fica um espaco (nao string vazia) de proposito: o titulo do
+      // produto ja e a primeira linha do texto da mensagem (ver renderMessage em
+      // services/message.ts) -- repetir no card so duplica. Testado com string
+      // vazia primeiro e o WhatsApp descarta o card inteiro (nem a foto aparece)
+      // quando title === ''; com um espaco em branco o card renderiza normal e
+      // o titulo fica invisivel, que e o efeito que queremos.
+      const linkPreview = preview
+        ? {
+            'canonical-url': preview.link,
+            'matched-text': preview.link,
+            title: ' ',
+            ...(preview.imageUrl ? await gerarPreviewImagem(this.sock, preview.imageUrl) : {}),
+          }
+        : undefined;
 
-    const sent = await this.sock.sendMessage(jid, { text, linkPreview });
+      const sent = await this.sock.sendMessage(jid, { text, linkPreview });
 
-    this.lastSentAt = Date.now();
-    await prisma.sendLog.update({ where: { day }, data: { count: { increment: 1 } } });
+      this.lastSentAt = Date.now();
+      await prisma.sendLog.update({ where: { day }, data: { count: { increment: 1 } } });
 
-    return sent?.key?.id ?? '';
+      return sent?.key?.id ?? '';
+    });
   }
 
   async quotaToday() {

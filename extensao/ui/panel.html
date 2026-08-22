@@ -7,43 +7,63 @@
   <span id="ligacao" class="ligacao" data-tom="">·</span>
 </header>
 
-<section id="fora-do-ml" class="aviso-vazio" hidden>
-  Abra um produto ou uma busca do Mercado Livre nesta aba para capturar.
-</section>
+<nav class="abas">
+  <button id="aba-btn-captura" class="aba aba--ativa" type="button">Captura</button>
+  <button id="aba-btn-logs" class="aba" type="button">
+    Logs <span id="logs-contagem-aba" class="aba__contagem"></span>
+  </button>
+</nav>
 
-<section id="sem-content-script" class="aviso-vazio" hidden>
-  A extensão foi atualizada. Recarregue a página (F5) para ativar a captura aqui.
-</section>
+<div id="aba-captura" class="painel-aba">
+  <section id="fora-do-ml" class="aviso-vazio" hidden>
+    Abra um produto ou uma busca do Mercado Livre nesta aba para capturar.
+  </section>
 
-<section id="area-captura" class="captura" hidden>
-  <div class="captura__barra">
-    <span id="origem-atual" class="origem"></span>
-    <button id="atualizar" class="btn-texto" title="Ler a página de novo">Atualizar</button>
+  <section id="sem-content-script" class="aviso-vazio" hidden>
+    A extensão foi atualizada. Recarregue a página (F5) para ativar a captura aqui.
+  </section>
+
+  <section id="area-captura" class="captura" hidden>
+    <div class="captura__barra">
+      <span id="origem-atual" class="origem"></span>
+      <div class="captura__acoes">
+        <button id="limpar" class="btn-texto" title="Remover tudo desta lista">Limpar</button>
+        <button id="atualizar" class="btn-texto" title="Ler a página de novo">Atualizar</button>
+      </div>
+    </div>
+
+    <div id="lista" class="lista"></div>
+
+    <div class="captura__rodape">
+      <label class="marcar-todos">
+        <input id="marcar-todos" type="checkbox" />
+        <span id="contagem">0 selecionados</span>
+      </label>
+      <button id="enviar" class="btn-principal" disabled>Enviar ao Hub</button>
+    </div>
+
+    <p id="resultado" class="resultado"></p>
+  </section>
+
+  <details class="config">
+    <summary>Conexão com o app</summary>
+    <label for="api">Endereço do app</label>
+    <input id="api" placeholder="http://localhost:3333" />
+
+    <label for="token">Token</label>
+    <input id="token" type="password" placeholder="cole o token de Conexões" />
+
+    <button id="salvar" class="btn-secundario">Salvar e testar</button>
+    <p id="estado-config"></p>
+  </details>
+</div>
+
+<div id="aba-logs" class="painel-aba logs" hidden>
+  <div class="logs__barra">
+    <span id="logs-contagem" class="origem"></span>
+    <button id="logs-limpar" class="btn-texto" title="Apagar todos os logs">Limpar logs</button>
   </div>
-
-  <div id="lista" class="lista"></div>
-
-  <div class="captura__rodape">
-    <label class="marcar-todos">
-      <input id="marcar-todos" type="checkbox" />
-      <span id="contagem">0 selecionados</span>
-    </label>
-    <button id="enviar" class="btn-principal" disabled>Enviar ao Hub</button>
-  </div>
-
-  <p id="resultado" class="resultado"></p>
-</section>
-
-<details class="config">
-  <summary>Conexão com o app</summary>
-  <label for="api">Endereço do app</label>
-  <input id="api" placeholder="http://localhost:3333" />
-
-  <label for="token">Token</label>
-  <input id="token" type="password" placeholder="cole o token de Conexões" />
-
-  <button id="salvar" class="btn-secundario">Salvar e testar</button>
-  <p id="estado-config"></p>
-</details>
+  <div id="logs-lista" class="logs__lista"></div>
+</div>
 
 <script src="panel.js" type="module"></script>

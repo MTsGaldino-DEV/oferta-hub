@@ -28,6 +28,48 @@ body {
 .ligacao[data-tom='ok'] { color: #6fdc9a; }
 .ligacao[data-tom='erro'] { color: #ff8b7a; }
 
+.abas {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 0;
+  border-bottom: 1px solid #26282e;
+  flex: none;
+}
+
+.aba {
+  background: none;
+  border: none;
+  color: #9aa0a6;
+  font: 600 12px system-ui, sans-serif;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-bottom: 2px solid transparent;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.aba:hover { color: #e8e9ea; }
+.aba--ativa { color: #ffe01b; border-bottom-color: #ffe01b; }
+
+.aba__contagem {
+  background: #26282e;
+  color: #9aa0a6;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 6px;
+  min-width: 14px;
+  text-align: center;
+}
+.aba--ativa .aba__contagem { background: #3a3410; color: #ffe01b; }
+
+.painel-aba {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .aviso-vazio {
   margin: 18px 16px;
   padding: 14px;
@@ -52,6 +94,12 @@ body {
   justify-content: space-between;
   padding: 10px 16px;
   flex: none;
+}
+
+.captura__acoes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .origem {
@@ -206,3 +254,51 @@ body {
 #estado-config { margin: 8px 0 0; font-size: 12px; min-height: 1.2em; }
 #estado-config[data-tom='ok'] { color: #6fdc9a; }
 #estado-config[data-tom='erro'] { color: #ff8b7a; }
+
+.logs { flex: 1; min-height: 0; }
+
+.logs__barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  flex: none;
+}
+
+.logs__lista {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+.log-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid #202226;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.log-item__hora {
+  flex: none;
+  color: #6b7076;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-item__origem {
+  flex: none;
+  text-transform: uppercase;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #9aa0a6;
+  align-self: flex-start;
+  margin-top: 1px;
+}
+
+.log-item__texto { min-width: 0; word-break: break-word; color: #cfd2d6; white-space: pre-wrap; }
+
+.log-item[data-nivel='erro'] .log-item__texto { color: #ff8b7a; }
+.log-item[data-nivel='aviso'] .log-item__texto { color: #ffd166; }

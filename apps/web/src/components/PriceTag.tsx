@@ -3,6 +3,8 @@ import { brl, STORE, type Offer } from '../api.js';
 
 interface Props {
   offer: Offer;
+  /** Posicao dessa oferta na fila atual (1 = proxima a sair). */
+  posicao: number;
   onSend: (id: string) => Promise<void>;
   onSkip: (id: string) => Promise<void>;
   onEdit: (offer: Offer) => void;
@@ -23,7 +25,7 @@ const CAMPEAO = 5000;
  * foto, preco, quanto paga. A nota fica de canto -- ela ordena a fila, mas
  * quem decide olha o produto.
  */
-export function PriceTag({ offer, onSend, onSkip, onEdit }: Props) {
+export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
   const [busy, setBusy] = useState<'send' | 'skip' | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +64,9 @@ export function PriceTag({ offer, onSend, onSkip, onEdit }: Props) {
       </div>
 
       <div className="card__corpo">
+        <span className="card__posicao" title="Posição na fila de envio atual">
+          #{posicao}
+        </span>
         {(offer.product.soldCount ?? 0) >= CAMPEAO && <span className="card__selo">Mais vendido</span>}
 
         <h3 className="card__titulo">{offer.product.title}</h3>

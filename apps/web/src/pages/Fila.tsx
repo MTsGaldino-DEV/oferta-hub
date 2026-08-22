@@ -26,6 +26,7 @@ export function Fila() {
   const [abas, setAbas] = useState<AbaNicho[]>([]);
   const [aba, setAba] = useState('');
   const [loading, setLoading] = useState(true);
+  const [enviadasHoje, setEnviadasHoje] = useState<number | null>(null);
   const [url, setUrl] = useState('');
   const [note, setNote] = useState('');
   const [adding, setAdding] = useState(false);
@@ -48,6 +49,7 @@ export function Fila() {
       const query = filtro ? `&nicheId=${encodeURIComponent(filtro)}` : '';
       setOffers(await api.get<Offer[]>(`/api/offers?status=PENDING${query}`));
       setAbas(await api.get<AbaNicho[]>('/api/offers/por-nicho?status=PENDING'));
+      void carregarEnviadasHoje();
     } finally {
       setLoading(false);
     }
@@ -57,6 +59,19 @@ export function Fila() {
     void load(aba);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aba]);
+
+  async function carregarEnviadasHoje() {
+    try {
+      const r = await api.get<{ total: number }>('/api/offers/enviadas-hoje');
+      setEnviadasHoje(r.total);
+    } catch {
+      // contador e informativo -- uma falha aqui nao pode travar a fila
+    }
+  }
+
+  useEffect(() => {
+    void carregarEnviadasHoje();
+  }, []);
 
   async function addUrl() {
     setAdding(true);
@@ -109,6 +124,7 @@ export function Fila() {
   async function send(id: string) {
     await api.post(`/api/offers/${id}/send`);
     retirar(id);
+    setEnviadasHoje((n) => (n ?? 0) + 1);
   }
 
   async function skip(id: string) {
@@ -175,6 +191,12 @@ export function Fila() {
           <p>
             Ordenada pela nota: histórico de preço pesa mais que o desconto anunciado. Nada sai daqui sem você
             clicar.
+            {enviadasHoje !== null && (
+              <>
+                {' '}
+                <strong>{enviadasHoje}</strong> enviada{enviadasHoje === 1 ? '' : 's'} hoje.
+              </>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -318,10 +340,11 @@ export function Fila() {
         </div>
       ) : (
         <div className="shelf">
-          {offers.map((o) => (
+          {offers.map((o, i) => (
             <PriceTag
               key={o.id}
               offer={o}
+              posicao={i + 1}
               onSend={send}
               onSkip={skip}
               onEdit={(offer) => {
