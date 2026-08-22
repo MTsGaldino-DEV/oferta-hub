@@ -219,7 +219,7 @@ export function Fila() {
       {error && <div className="notice">{error}</div>}
       {aviso && <div className="notice" data-tone="warn">{aviso}</div>}
 
-      <div className="panel">
+      <div className="panel panel--hero">
         <h2 className="panel__title">Adicionar oferta</h2>
         <div className="row">
           <div className="field" style={{ flex: '2 1 340px' }}>

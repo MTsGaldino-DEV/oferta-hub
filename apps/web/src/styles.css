@@ -349,6 +349,18 @@ textarea {
   margin: 0 0 14px;
 }
 
+.panel--hero {
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface));
+  border-color: var(--brand);
+  padding: 24px;
+}
+
+.panel--hero .panel__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
 .row {
   display: flex;
   gap: 10px;
