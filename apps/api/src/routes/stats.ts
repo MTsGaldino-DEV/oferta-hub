@@ -15,7 +15,7 @@ export async function statsRoutes(app: FastifyInstance) {
     const since = new Date(Date.now() - days * DAY_MS);
     const previousSince = new Date(Date.now() - 2 * days * DAY_MS);
 
-    const [sent, prevSent, clicks, prevClicks, conversions, prevConversions, pending, queued] =
+    const [sent, prevSent, clicks, prevClicks, conversions, prevConversions, pending, queued, dispatching] =
       await Promise.all([
         prisma.offer.count({ where: { status: OfferStatus.SENT, sentAt: { gte: since } } }),
         prisma.offer.count({
@@ -35,6 +35,7 @@ export async function statsRoutes(app: FastifyInstance) {
         }),
         prisma.offer.count({ where: { status: OfferStatus.PENDING } }),
         prisma.offer.count({ where: { status: OfferStatus.QUEUED } }),
+        prisma.offer.count({ where: { status: OfferStatus.DISPATCHING } }),
       ]);
 
     const revenue = num(conversions._sum.commissionBrl) ?? 0;
@@ -51,6 +52,7 @@ export async function statsRoutes(app: FastifyInstance) {
       conversionRate: clicks ? Number(((conversions._count / clicks) * 100).toFixed(2)) : 0,
       pending,
       queued,
+      dispatching,
     };
   });
 

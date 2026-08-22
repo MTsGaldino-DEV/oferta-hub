@@ -6,6 +6,7 @@ interface Overview {
   sent: { value: number };
   clicks: { value: number };
   pending: number;
+  dispatching: number;
 }
 
 function Kpi({ label, value }: { label: string; value: string }) {
@@ -65,10 +66,17 @@ export function VisaoGeral() {
 
       <div className="panel">
         <h2 className="panel__title">Disparos</h2>
-        <div className="empty">
-          <strong>Disparos ainda não existe</strong>
-          Em breve.
-        </div>
+        {overview && overview.dispatching > 0 ? (
+          <div className="empty">
+            <strong>{int(overview.dispatching)} oferta(s) em disparo agora</strong>
+            <Link to="/disparos">Ver disparos em andamento →</Link>
+          </div>
+        ) : (
+          <div className="empty">
+            <strong>Nenhum disparo em andamento</strong>
+            <Link to="/disparos">Começar um disparo →</Link>
+          </div>
+        )}
       </div>
 
       <div className="split">

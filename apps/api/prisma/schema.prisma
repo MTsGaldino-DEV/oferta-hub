@@ -354,8 +354,8 @@ model GroupMemberEvent {
 /// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}
 /// {PRECO_ANTIGO} {LINK} {CUPOM}) trocados pelos dados da oferta na hora do
 /// envio. `ctas` e um pool de chamadas finais -- uma sorteada por envio, pra
-/// nao repetir sempre a mesma linha. Ainda nao e usado por nada: existe pra
-/// alimentar a futura tela de Disparos.
+/// nao repetir sempre a mesma linha. Usado pelo Disparo (campo templateId)
+/// pra montar a mensagem de cada envio.
 model MessageTemplate {
   id        String   @id @default(cuid())
   name      String   @unique

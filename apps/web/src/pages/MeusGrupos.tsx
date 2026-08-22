@@ -48,7 +48,7 @@ export function MeusGrupos() {
         {groups === null ? null : groups.length === 0 ? (
           <div className="empty">
             <strong>Nenhum grupo sincronizado</strong>
-            Conecte o WhatsApp e sincronize os grupos em Conexões para ver as métricas aqui.
+            Conecte o WhatsApp e sincronize os grupos em Configurações para ver as métricas aqui.
           </div>
         ) : (
           <>

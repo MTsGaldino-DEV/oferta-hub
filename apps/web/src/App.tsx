@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { api } from './api.js';
 import { Layout } from './components/Layout.js';
 import { Logo } from './components/Logo.js';
@@ -93,6 +93,7 @@ export default function App() {
         <Route path="/automacoes" element={<Automacoes />} />
         <Route path="/disparos" element={<Disparos />} />
         <Route path="/configuracoes" element={<Configuracoes />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>
   );

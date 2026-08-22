@@ -102,11 +102,7 @@ export function Garimpar() {
                     key={f.id}
                     className="catbox__item"
                     onClick={() => setCategoriaId(f.id)}
-                    style={
-                      categoriaId === f.id
-                        ? { background: 'rgba(22, 23, 26, 0.06)', fontWeight: 700 }
-                        : undefined
-                    }
+                    data-picked={categoriaId === f.id}
                   >
                     <span>{f.nome}</span>
                     <em>{int(f.itens)}</em>

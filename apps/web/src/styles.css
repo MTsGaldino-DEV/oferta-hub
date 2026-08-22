@@ -902,6 +902,11 @@ button.chip {
   background: rgba(22, 23, 26, 0.04);
 }
 
+.catbox__item[data-picked='true'] {
+  background: var(--brand);
+  font-weight: 700;
+}
+
 .catbox__item input {
   width: auto;
   flex: none;
@@ -1447,7 +1452,8 @@ button.chip {
 [data-theme='dark'] .tag__score,
 [data-theme='dark'] .tabs__item[data-on='true'] span,
 [data-theme='dark'] .card__selo,
-[data-theme='dark'] .card__nicho {
+[data-theme='dark'] .card__nicho,
+[data-theme='dark'] .catbox__item[data-picked='true'] {
   color: #16171a;
 }
 

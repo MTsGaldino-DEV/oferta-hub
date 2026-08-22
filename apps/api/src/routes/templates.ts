@@ -79,6 +79,12 @@ export async function templateRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/api/templates/:id', async (req, reply) => {
     const t = await prisma.messageTemplate.findUnique({ where: { id: req.params.id } });
     if (!t) return { ok: true };
+
+    const emUso = await prisma.disparo.count({ where: { templateId: req.params.id } });
+    if (emUso > 0) {
+      return reply.code(409).send({ error: 'Esse modelo já foi usado em algum disparo e não pode ser apagado.' });
+    }
+
     await prisma.messageTemplate.delete({ where: { id: req.params.id } });
 
     // Apagou o padrão: promove o mais recente que sobrou, pra sempre existir
