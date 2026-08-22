@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { getTheme, setTheme } from '../theme.js';
 
 interface PlatformInfo {
   platform: string;
@@ -208,6 +209,8 @@ export function Conexoes() {
         )}
       </div>
 
+      <AparenciaCard />
+
       <ExtensaoCard />
 
       {[...platforms]
@@ -216,6 +219,28 @@ export function Conexoes() {
           <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
         ))}
     </>
+  );
+}
+
+function AparenciaCard() {
+  const [theme, setThemeState] = useState(getTheme());
+
+  return (
+    <div className="panel">
+      <h2 className="panel__title">Aparência</h2>
+      <div className="row">
+        <button
+          className="btn btn--ghost"
+          onClick={() => {
+            const next = theme === 'dark' ? 'light' : 'dark';
+            setTheme(next);
+            setThemeState(next);
+          }}
+        >
+          {theme === 'dark' ? 'Modo claro' : 'Modo escuro'}
+        </button>
+      </div>
+    </div>
   );
 }
 
