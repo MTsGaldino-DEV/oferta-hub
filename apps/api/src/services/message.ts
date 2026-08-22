@@ -26,7 +26,7 @@ export interface MessageInput {
  * Aqui nao: dizer "R$ 13" num produto de R$ 12,10 e anunciar preco errado, e
  * o ganho estetico nao paga isso. Sem centavos o numero ja fica limpo.
  */
-const brl = (v: number): string => {
+export const brl = (v: number): string => {
   const inteiro = Number.isInteger(v);
   return v.toLocaleString('pt-BR', {
     style: 'currency',

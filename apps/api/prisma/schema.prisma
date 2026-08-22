@@ -324,6 +324,22 @@ model WhatsappGroup {
   updatedAt DateTime @updatedAt
 }
 
+/// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}
+/// {PRECO_ANTIGO} {LINK} {CUPOM}) trocados pelos dados da oferta na hora do
+/// envio. `ctas` e um pool de chamadas finais -- uma sorteada por envio, pra
+/// nao repetir sempre a mesma linha. Ainda nao e usado por nada: existe pra
+/// alimentar a futura tela de Disparos.
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  body      String
+  ctas      String[] @default([])
+  showImage Boolean  @default(true)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// Contador diario de envios, pra respeitar o teto e nao queimar o numero.
 model SendLog {
   id     String   @id @default(cuid())

@@ -20,6 +20,7 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
     items: [
       { to: '/agenda', label: 'Agenda' },
       { to: '/automacoes', label: 'Automações' },
+      { to: '/templates', label: 'Modelos' },
     ],
   },
   { label: 'Métricas', items: [{ to: '/desempenho', label: 'Desempenho' }] },

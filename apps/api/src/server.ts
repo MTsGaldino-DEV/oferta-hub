@@ -13,6 +13,7 @@ import { nichoRoutes } from './routes/nichos.js';
 import { offerRoutes } from './routes/offers.js';
 import { redirectRoutes } from './routes/redirect.js';
 import { statsRoutes } from './routes/stats.js';
+import { templateRoutes } from './routes/templates.js';
 import { watchRoutes } from './routes/watch.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
@@ -75,6 +76,7 @@ await app.register(async (instance) => {
   await instance.register(nichoRoutes);
   await instance.register(offerRoutes);
   await instance.register(statsRoutes);
+  await instance.register(templateRoutes);
   await instance.register(watchRoutes);
   await instance.register(whatsappRoutes);
 
