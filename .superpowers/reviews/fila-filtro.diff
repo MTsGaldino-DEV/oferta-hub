@@ -1,0 +1,173 @@
+ec67c66 feat(web): filtro por plataforma na fila
+---
+ apps/web/src/pages/Fila.tsx | 63 +++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 50 insertions(+), 13 deletions(-)
+---
+diff --git a/apps/web/src/pages/Fila.tsx b/apps/web/src/pages/Fila.tsx
+index 2159789..9fd8631 100644
+--- a/apps/web/src/pages/Fila.tsx
++++ b/apps/web/src/pages/Fila.tsx
+@@ -13,30 +13,31 @@ interface Found {
+   commissionPct?: number;
+   error?: string;
+ }
+ 
+ /** Quantas ofertas cada nicho tem parada na fila. */
+ interface AbaNicho {
+   nicheId: string;
+   nome: string;
+   total: number;
+ }
+ 
+ export function Fila() {
+   const [offers, setOffers] = useState<Offer[]>([]);
+   const [abas, setAbas] = useState<AbaNicho[]>([]);
+   const [aba, setAba] = useState('');
++  const [plataforma, setPlataforma] = useState('');
+   const [loading, setLoading] = useState(true);
+   const [enviadasHoje, setEnviadasHoje] = useState<number | null>(null);
+   const [url, setUrl] = useState('');
+   const [note, setNote] = useState('');
+   const [adding, setAdding] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+ 
+   const [term, setTerm] = useState('');
+   const [found, setFound] = useState<Found[] | null>(null);
+   const [searching, setSearching] = useState(false);
+ 
+   const [limpando, setLimpando] = useState(false);
+   const [limpandoFila, setLimpandoFila] = useState(false);
+   const [aviso, setAviso] = useState<string | null>(null);
+ 
+@@ -48,30 +49,45 @@ export function Fila() {
+     try {
+       const query = filtro ? `&nicheId=${encodeURIComponent(filtro)}` : '';
+       setOffers(await api.get<Offer[]>(`/api/offers?status=PENDING${query}`));
+       setAbas(await api.get<AbaNicho[]>('/api/offers/por-nicho?status=PENDING'));
+       void carregarEnviadasHoje();
+     } finally {
+       setLoading(false);
+     }
+   }
+ 
+   useEffect(() => {
+     void load(aba);
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [aba]);
+ 
++  /** Quantas ofertas de cada plataforma estao na fila carregada. */
++  const contagemPlataforma = offers.reduce<Record<string, number>>((acc, o) => {
++    const p = o.product.platform;
++    acc[p] = (acc[p] ?? 0) + 1;
++    return acc;
++  }, {});
++  const plataformas = Object.keys(contagemPlataforma);
++
++  // Se a plataforma escolhida sumiu da fila (oferta enviada/pulada, ou troca de aba de nicho),
++  // volta pra "Todos" em vez de deixar a grade vazia sem saida.
++  useEffect(() => {
++    if (plataforma && !contagemPlataforma[plataforma]) setPlataforma('');
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [offers]);
++
+   async function carregarEnviadasHoje() {
+     try {
+       const r = await api.get<{ total: number }>('/api/offers/enviadas-hoje');
+       setEnviadasHoje(r.total);
+     } catch {
+       // contador e informativo -- uma falha aqui nao pode travar a fila
+     }
+   }
+ 
+   useEffect(() => {
+     void carregarEnviadasHoje();
+   }, []);
+ 
+   async function addUrl() {
+     setAdding(true);
+@@ -320,51 +336,72 @@ export function Fila() {
+             Todos <span>{abas.reduce((n, a) => n + a.total, 0)}</span>
+           </button>
+           {abas.map((a) => (
+             <button
+               key={a.nicheId}
+               className="tabs__item"
+               data-on={aba === a.nicheId}
+               onClick={() => setAba(a.nicheId)}
+             >
+               {a.nome} <span>{a.total}</span>
+             </button>
+           ))}
+         </div>
+       )}
+ 
++      {plataformas.length > 1 && (
++        <div className="tabs">
++          <button className="tabs__item" data-on={plataforma === ''} onClick={() => setPlataforma('')}>
++            Todos <span>{offers.length}</span>
++          </button>
++          {plataformas.map((p) => (
++            <button
++              key={p}
++              className="tabs__item"
++              data-on={plataforma === p}
++              onClick={() => setPlataforma(p)}
++            >
++              {STORE[p] ?? p} <span>{contagemPlataforma[p]}</span>
++            </button>
++          ))}
++        </div>
++      )}
++
+       {loading ? null : offers.length === 0 ? (
+         <div className="empty">
+           <strong>Fila vazia</strong>
+           Cole um link acima, ou espere os workers: o monitor de preço roda de hora em hora e o garimpo a cada 3
+           horas.
+         </div>
+       ) : (
+         <div className="shelf">
+-          {offers.map((o, i) => (
+-            <PriceTag
+-              key={o.id}
+-              offer={o}
+-              posicao={i + 1}
+-              onSend={send}
+-              onSkip={skip}
+-              onEdit={(offer) => {
+-                setEditing(offer);
+-                setDraft(offer.message);
+-              }}
+-            />
+-          ))}
++          {offers
++            .map((o, i) => ({ offer: o, posicao: i + 1 }))
++            .filter(({ offer }) => !plataforma || offer.product.platform === plataforma)
++            .map(({ offer, posicao }) => (
++              <PriceTag
++                key={offer.id}
++                offer={offer}
++                posicao={posicao}
++                onSend={send}
++                onSkip={skip}
++                onEdit={(o) => {
++                  setEditing(o);
++                  setDraft(o.message);
++                }}
++              />
++            ))}
+         </div>
+       )}
+ 
+       {editing && (
+         <div className="panel" style={{ marginTop: 20 }}>
+           <h2 className="panel__title">Texto que vai pro grupo</h2>
+           <textarea rows={12} value={draft} onChange={(e) => setDraft(e.target.value)} />
+           <div className="row" style={{ marginTop: 12 }}>
+             <button className="btn" onClick={() => void saveDraft()}>
+               Salvar texto
+             </button>
+             <button
+               className="btn btn--ghost"
+               onClick={async () => {
+                 const rebuilt = await api.post<Offer>(`/api/offers/${editing.id}/rebuild`);

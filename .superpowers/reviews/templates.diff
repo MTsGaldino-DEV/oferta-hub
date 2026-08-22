@@ -1,0 +1,723 @@
+fedc096 fix(templates): linha com token vazio some inteira
+1f0935a feat(templates): CRUD de modelos de mensagem com CTA sorteado
+---
+ .superpowers/templates-report.md   | 218 ++++++++++++++++++++++++
+ apps/api/prisma/schema.prisma      |  16 ++
+ apps/api/src/routes/templates.ts   | 104 ++++++++++++
+ apps/api/src/server.ts             |   2 +
+ apps/api/src/services/message.ts   |   2 +-
+ apps/api/src/services/template.ts  |  73 ++++++++
+ apps/web/src/App.tsx               |   2 +
+ apps/web/src/components/Layout.tsx |   1 +
+ apps/web/src/pages/Templates.tsx   | 333 +++++++++++++++++++++++++++++++++++++
+ 9 files changed, 750 insertions(+), 1 deletion(-)
+---
+diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
+index 51a7880..b61e37b 100644
+--- a/apps/api/prisma/schema.prisma
++++ b/apps/api/prisma/schema.prisma
+@@ -317,16 +317,32 @@ model AppSetting {
+ }
+ 
+ model WhatsappGroup {
+   id        String   @id @default(cuid())
+   jid       String   @unique
+   name      String
+   isDefault Boolean  @default(false)
+   updatedAt DateTime @updatedAt
+ }
+ 
++/// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}
++/// {PRECO_ANTIGO} {LINK} {CUPOM}) trocados pelos dados da oferta na hora do
++/// envio. `ctas` e um pool de chamadas finais -- uma sorteada por envio, pra
++/// nao repetir sempre a mesma linha. Ainda nao e usado por nada: existe pra
++/// alimentar a futura tela de Disparos.
++model MessageTemplate {
++  id        String   @id @default(cuid())
++  name      String   @unique
++  body      String
++  ctas      String[] @default([])
++  showImage Boolean  @default(true)
++  isDefault Boolean  @default(false)
++  createdAt DateTime @default(now())
++  updatedAt DateTime @updatedAt
++}
++
+ /// Contador diario de envios, pra respeitar o teto e nao queimar o numero.
+ model SendLog {
+   id     String   @id @default(cuid())
+   day    String   @unique
+   count  Int      @default(0)
+ }
+diff --git a/apps/api/src/routes/templates.ts b/apps/api/src/routes/templates.ts
+new file mode 100644
+index 0000000..a8b2ab0
+--- /dev/null
++++ b/apps/api/src/routes/templates.ts
+@@ -0,0 +1,104 @@
++import type { FastifyInstance } from 'fastify';
++import { z } from 'zod';
++import { prisma } from '../db.js';
++import { renderTemplate } from '../services/template.js';
++
++const corpoTemplate = z.object({
++  name: z.string().min(2, 'O nome precisa de pelo menos 2 letras.').max(60),
++  body: z.string().min(1, 'O texto não pode ficar vazio.'),
++  ctas: z.array(z.string().min(1).max(120)).max(20).default([]),
++  showImage: z.boolean().default(true),
++  isDefault: z.boolean().default(false),
++});
++
++const serialize = (t: any) => ({
++  id: t.id,
++  name: t.name,
++  body: t.body,
++  ctas: t.ctas,
++  showImage: t.showImage,
++  isDefault: t.isDefault,
++  createdAt: t.createdAt,
++  updatedAt: t.updatedAt,
++});
++
++/** Oferta de mentira, só pra pré-visualização renderizar sem precisar de oferta real. */
++const OFERTA_EXEMPLO = {
++  title: 'Fone de Ouvido Bluetooth XYZ Pro',
++  price: 89.9,
++  comparePrice: 149.9,
++  couponCode: 'PROMO10',
++  link: 'https://oferta.hub/r/exemplo',
++};
++
++export async function templateRoutes(app: FastifyInstance) {
++  app.get('/api/templates', async () => {
++    const templates = await prisma.messageTemplate.findMany({
++      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
++    });
++    return templates.map(serialize);
++  });
++
++  app.post('/api/templates', async (req, reply) => {
++    const body = corpoTemplate.parse(req.body);
++    const existe = await prisma.messageTemplate.findUnique({ where: { name: body.name } });
++    if (existe) return reply.code(409).send({ error: 'Já existe um modelo com esse nome.' });
++
++    // Primeiro modelo do zero: já nasce padrão, senão a lista fica sem
++    // nenhum pré-selecionado.
++    const total = await prisma.messageTemplate.count();
++    const isDefault = body.isDefault || total === 0;
++
++    if (isDefault) {
++      await prisma.messageTemplate.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
++    }
++    const criado = await prisma.messageTemplate.create({ data: { ...body, isDefault } });
++    return reply.code(201).send(serialize(criado));
++  });
++
++  app.put<{ Params: { id: string } }>('/api/templates/:id', async (req, reply) => {
++    const body = corpoTemplate.parse(req.body);
++    const atual = await prisma.messageTemplate.findUnique({ where: { id: req.params.id } });
++    if (!atual) return reply.code(404).send({ error: 'Modelo não encontrado.' });
++
++    const outroComMesmoNome = await prisma.messageTemplate.findUnique({ where: { name: body.name } });
++    if (outroComMesmoNome && outroComMesmoNome.id !== req.params.id) {
++      return reply.code(409).send({ error: 'Já existe um modelo com esse nome.' });
++    }
++
++    if (body.isDefault) {
++      await prisma.messageTemplate.updateMany({
++        where: { isDefault: true, id: { not: req.params.id } },
++        data: { isDefault: false },
++      });
++    }
++    const atualizado = await prisma.messageTemplate.update({ where: { id: req.params.id }, data: body });
++    return serialize(atualizado);
++  });
++
++  app.delete<{ Params: { id: string } }>('/api/templates/:id', async (req, reply) => {
++    const t = await prisma.messageTemplate.findUnique({ where: { id: req.params.id } });
++    if (!t) return { ok: true };
++    await prisma.messageTemplate.delete({ where: { id: req.params.id } });
++
++    // Apagou o padrão: promove o mais recente que sobrou, pra sempre existir
++    // um pré-selecionado enquanto houver ao menos um modelo.
++    if (t.isDefault) {
++      const proximo = await prisma.messageTemplate.findFirst({ orderBy: { createdAt: 'desc' } });
++      if (proximo) await prisma.messageTemplate.update({ where: { id: proximo.id }, data: { isDefault: true } });
++    }
++    return { ok: true };
++  });
++
++  /** Renderiza um corpo (ainda não salvo) contra uma oferta de mentira, pra UI mostrar o resultado sem precisar de oferta real. */
++  app.post('/api/templates/preview', async (req, reply) => {
++    const body = z
++      .object({ body: z.string(), ctas: z.array(z.string()).default([]) })
++      .parse(req.body);
++    try {
++      return { text: renderTemplate(body.body, OFERTA_EXEMPLO, body.ctas) };
++    } catch (err) {
++      return reply.code(400).send({ error: err instanceof Error ? err.message : 'Falha ao renderizar.' });
++    }
++  });
++}
+diff --git a/apps/api/src/server.ts b/apps/api/src/server.ts
+index b04ead1..f4a736d 100644
+--- a/apps/api/src/server.ts
++++ b/apps/api/src/server.ts
+@@ -6,20 +6,21 @@ import { env } from './env.js';
+ import { prisma } from './db.js';
+ import { logger } from './lib/logger.js';
+ import { authRoutes, requireAuth } from './plugins/auth.js';
+ import { automacaoRoutes } from './routes/automacoes.js';
+ import { credentialRoutes } from './routes/credentials.js';
+ import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
+ import { nichoRoutes } from './routes/nichos.js';
+ import { offerRoutes } from './routes/offers.js';
+ import { redirectRoutes } from './routes/redirect.js';
+ import { statsRoutes } from './routes/stats.js';
++import { templateRoutes } from './routes/templates.js';
+ import { watchRoutes } from './routes/watch.js';
+ import { whatsappRoutes } from './routes/whatsapp.js';
+ import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
+ import { whatsapp } from './whatsapp/baileys.js';
+ 
+ const app = Fastify({ logger: false, trustProxy: true });
+ 
+ // Precisa vir ANTES de qualquer plugin/rota: o Fastify amarra o handler de
+ // erro a cada rota no momento em que ela e registrada, nao dinamicamente --
+ // declarado depois (como estava), nenhuma rota do app usava esse handler, e
+@@ -68,20 +69,21 @@ await app.register(extensaoRoutes);
+ 
+ // Tudo abaixo exige sessao.
+ await app.register(async (instance) => {
+   instance.addHook('onRequest', requireAuth);
+   await instance.register(automacaoRoutes);
+   await instance.register(credentialRoutes);
+   await instance.register(extensaoAdminRoutes);
+   await instance.register(nichoRoutes);
+   await instance.register(offerRoutes);
+   await instance.register(statsRoutes);
++  await instance.register(templateRoutes);
+   await instance.register(watchRoutes);
+   await instance.register(whatsappRoutes);
+ 
+   // Disparo manual dos workers, pra testar sem esperar o cron.
+   // Espera terminar e devolve o resumo: sem isso o clique e indistinguivel de
+   // nada acontecer quando a lista esta vazia ou a plataforma recusa.
+   instance.post('/api/jobs/price-monitor', async () => ({ ok: true, ...(await runPriceMonitor()) }));
+   instance.post('/api/jobs/discovery', async () => ({ ok: true, ...(await runDiscovery()) }));
+   instance.post('/api/jobs/category-sync', async () => ({ ok: true, ...(await runCategorySync()) }));
+ });
+diff --git a/apps/api/src/services/message.ts b/apps/api/src/services/message.ts
+index 09a6b1e..634b00c 100644
+--- a/apps/api/src/services/message.ts
++++ b/apps/api/src/services/message.ts
+@@ -19,21 +19,21 @@ export interface MessageInput {
+   anuncio?: boolean;
+ }
+ 
+ /**
+  * "R$ 468" quando nao ha centavos, "R$ 33,66" quando ha.
+  *
+  * O modelo em que este formato se baseia arredonda tudo pra reais inteiros.
+  * Aqui nao: dizer "R$ 13" num produto de R$ 12,10 e anunciar preco errado, e
+  * o ganho estetico nao paga isso. Sem centavos o numero ja fica limpo.
+  */
+-const brl = (v: number): string => {
++export const brl = (v: number): string => {
+   const inteiro = Number.isInteger(v);
+   return v.toLocaleString('pt-BR', {
+     style: 'currency',
+     currency: 'BRL',
+     minimumFractionDigits: inteiro ? 0 : 2,
+     maximumFractionDigits: 2,
+   });
+ };
+ 
+ /** Corta o titulo sem quebrar palavra no meio. */
+diff --git a/apps/api/src/services/template.ts b/apps/api/src/services/template.ts
+new file mode 100644
+index 0000000..1df8f5e
+--- /dev/null
++++ b/apps/api/src/services/template.ts
+@@ -0,0 +1,73 @@
++import { brl } from './message.js';
++
++export interface TemplateOfferData {
++  title: string;
++  price: number;
++  /** Nulo ou menor/igual ao preco atual = sem "de/por" pra mostrar. */
++  comparePrice?: number | null;
++  couponCode?: string | null;
++  link: string;
++}
++
++type Token = 'TITULO' | 'PRECO' | 'PRECO_ANTIGO' | 'LINK' | 'CUPOM';
++
++function valores(d: TemplateOfferData): Record<Token, string | null> {
++  return {
++    TITULO: d.title,
++    PRECO: brl(d.price),
++    PRECO_ANTIGO: d.comparePrice && d.comparePrice > d.price ? brl(d.comparePrice) : null,
++    LINK: d.link,
++    CUPOM: d.couponCode || null,
++  };
++}
++
++const TOKEN_RE = /\{([A-Z_]+)\}/g;
++
++/**
++ * Troca os tokens {TITULO} {PRECO} {PRECO_ANTIGO} {LINK} {CUPOM} pelos dados
++ * da oferta.
++ *
++ * Token desconhecido (typo tipo {TITULOO}): fica intacto no texto -- apagar
++ * silenciosamente esconderia o erro de quem escreveu o modelo.
++ *
++ * Token conhecido sem valor (sem cupom, sem preco antigo): a linha inteira
++ * some, mesmo que outros tokens dela tenham valor. Motivo: uma linha como
++ * "De ~{PRECO_ANTIGO}~ por *{PRECO}*" sem preco antigo nao vira frase
++ * valida so tirando o token ("De por *R$ 89,90*") -- fica quebrada. Por
++ * isso quem escreve o modelo deve colocar o fallback (o preco simples)
++ * numa linha propria separada, ja que uma linha mista some por inteiro.
++ */
++export function renderTemplate(
++  body: string,
++  data: TemplateOfferData,
++  ctas: string[] = [],
++  escolherCta: (opcoes: string[]) => string = (opcoes) => opcoes[Math.floor(Math.random() * opcoes.length)],
++): string {
++  const vals = valores(data);
++
++  const linhas = body.split('\n').map((linha) => {
++    const tokensConhecidos = [...linha.matchAll(TOKEN_RE)]
++      .map((m) => m[1] as Token)
++      .filter((nome) => nome in vals);
++
++    if (tokensConhecidos.length > 0 && tokensConhecidos.some((nome) => vals[nome] === null)) {
++      return null; // linha tinha um token conhecido sem valor
++    }
++
++    const out = linha.replace(TOKEN_RE, (match, nome: string) => {
++      if (!(nome in vals)) return match; // token desconhecido: mantem visivel
++      const v = vals[nome as Token];
++      return v === null ? '' : v;
++    });
++    return out.replace(/ {2,}/g, ' ').trim();
++  });
++
++  let texto = linhas.filter((l): l is string => l !== null).join('\n');
++  texto = texto.replace(/\n{3,}/g, '\n\n'); // sobra rara de espaçamento ao redor de uma linha removida
++
++  if (ctas.length > 0) {
++    texto = `${texto}\n\n${escolherCta(ctas)}`;
++  }
++
++  return texto;
++}
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index 8a3ec72..d31cb1e 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -3,20 +3,21 @@ import { Route, Routes } from 'react-router-dom';
+ import { api } from './api.js';
+ import { Layout } from './components/Layout.js';
+ import { Logo } from './components/Logo.js';
+ import { VisaoGeral } from './pages/VisaoGeral.js';
+ import { Fila } from './pages/Fila.js';
+ import { Desempenho } from './pages/Desempenho.js';
+ import { Nichos } from './pages/Nichos.js';
+ import { Produtos } from './pages/Produtos.js';
+ import { Agenda } from './pages/Agenda.js';
+ import { Automacoes } from './pages/Automacoes.js';
++import { Templates } from './pages/Templates.js';
+ import { Conexoes } from './pages/Conexoes.js';
+ 
+ function Login({ onIn }: { onIn: () => void }) {
+   const [password, setPassword] = useState('');
+   const [error, setError] = useState<string | null>(null);
+   const [busy, setBusy] = useState(false);
+ 
+   async function submit() {
+     setBusy(true);
+     setError(null);
+@@ -79,15 +80,16 @@ export default function App() {
+   return (
+     <Layout>
+       <Routes>
+         <Route path="/" element={<VisaoGeral />} />
+         <Route path="/fila" element={<Fila />} />
+         <Route path="/desempenho" element={<Desempenho />} />
+         <Route path="/produtos" element={<Produtos />} />
+         <Route path="/nichos" element={<Nichos />} />
+         <Route path="/agenda" element={<Agenda />} />
+         <Route path="/automacoes" element={<Automacoes />} />
++        <Route path="/templates" element={<Templates />} />
+         <Route path="/conexoes" element={<Conexoes />} />
+       </Routes>
+     </Layout>
+   );
+ }
+diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
+index 0432878..516ff68 100644
+--- a/apps/web/src/components/Layout.tsx
++++ b/apps/web/src/components/Layout.tsx
+@@ -13,20 +13,21 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
+     items: [
+       { to: '/nichos', label: 'Nichos' },
+       { to: '/produtos', label: 'Preços vigiados' },
+     ],
+   },
+   {
+     label: 'Automação',
+     items: [
+       { to: '/agenda', label: 'Agenda' },
+       { to: '/automacoes', label: 'Automações' },
++      { to: '/templates', label: 'Modelos' },
+     ],
+   },
+   { label: 'Métricas', items: [{ to: '/desempenho', label: 'Desempenho' }] },
+   { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
+ ];
+ 
+ export function Layout({ children }: { children: React.ReactNode }) {
+   const [pending, setPending] = useState(0);
+   const [wa, setWa] = useState<{ status: string; quota: { used: number; cap: number } } | null>(null);
+   const location = useLocation();
+diff --git a/apps/web/src/pages/Templates.tsx b/apps/web/src/pages/Templates.tsx
+new file mode 100644
+index 0000000..096295d
+--- /dev/null
++++ b/apps/web/src/pages/Templates.tsx
+@@ -0,0 +1,333 @@
++import { useEffect, useRef, useState } from 'react';
++import { api } from '../api.js';
++
++interface Template {
++  id: string;
++  name: string;
++  body: string;
++  ctas: string[];
++  showImage: boolean;
++  isDefault: boolean;
++}
++
++const TOKENS = ['{TITULO}', '{PRECO}', '{PRECO_ANTIGO}', '{LINK}', '{CUPOM}'];
++
++const rascunhoVazio = {
++  name: '',
++  body: '',
++  ctas: [] as string[],
++  showImage: true,
++  isDefault: false,
++};
++
++export function Templates() {
++  const [templates, setTemplates] = useState<Template[]>([]);
++  const [editando, setEditando] = useState<string | 'novo' | null>(null);
++  const [rascunho, setRascunho] = useState(rascunhoVazio);
++  const [novoCta, setNovoCta] = useState('');
++  const [preview, setPreview] = useState('');
++  const [erro, setErro] = useState<string | null>(null);
++  const [busy, setBusy] = useState(false);
++  const textareaRef = useRef<HTMLTextAreaElement>(null);
++
++  async function carregar() {
++    setTemplates(await api.get<Template[]>('/api/templates'));
++  }
++
++  useEffect(() => {
++    void carregar().catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar.'));
++  }, []);
++
++  // Pré-visualização acompanha o rascunho, com um pequeno atraso pra não bater na API a cada tecla.
++  useEffect(() => {
++    if (!editando) return;
++    const t = setTimeout(() => {
++      api
++        .post<{ text: string }>('/api/templates/preview', { body: rascunho.body, ctas: rascunho.ctas })
++        .then((r) => setPreview(r.text))
++        .catch(() => setPreview(''));
++    }, 300);
++    return () => clearTimeout(t);
++  }, [editando, rascunho.body, rascunho.ctas]);
++
++  function abrirNovo() {
++    setRascunho(rascunhoVazio);
++    setEditando('novo');
++    setErro(null);
++  }
++
++  function abrirEdicao(t: Template) {
++    setRascunho({ name: t.name, body: t.body, ctas: [...t.ctas], showImage: t.showImage, isDefault: t.isDefault });
++    setEditando(t.id);
++    setErro(null);
++  }
++
++  function inserirToken(token: string) {
++    const el = textareaRef.current;
++    if (!el) {
++      setRascunho((r) => ({ ...r, body: r.body + token }));
++      return;
++    }
++    const inicio = el.selectionStart ?? el.value.length;
++    const fim = el.selectionEnd ?? el.value.length;
++    const novoBody = rascunho.body.slice(0, inicio) + token + rascunho.body.slice(fim);
++    setRascunho((r) => ({ ...r, body: novoBody }));
++    requestAnimationFrame(() => {
++      el.focus();
++      el.selectionStart = el.selectionEnd = inicio + token.length;
++    });
++  }
++
++  function adicionarCta() {
++    const texto = novoCta.trim();
++    if (!texto) return;
++    setRascunho((r) => ({ ...r, ctas: [...r.ctas, texto] }));
++    setNovoCta('');
++  }
++
++  function removerCta(i: number) {
++    setRascunho((r) => ({ ...r, ctas: r.ctas.filter((_, idx) => idx !== i) }));
++  }
++
++  async function salvar() {
++    if (rascunho.name.trim().length < 2) return setErro('O nome precisa de pelo menos 2 letras.');
++    if (!rascunho.body.trim()) return setErro('O texto não pode ficar vazio.');
++
++    setBusy(true);
++    setErro(null);
++    try {
++      const corpo = {
++        name: rascunho.name.trim(),
++        body: rascunho.body,
++        ctas: rascunho.ctas,
++        showImage: rascunho.showImage,
++        isDefault: rascunho.isDefault,
++      };
++      if (editando === 'novo') await api.post('/api/templates', corpo);
++      else await api.put(`/api/templates/${editando}`, corpo);
++      setEditando(null);
++      await carregar();
++    } catch (err) {
++      setErro(err instanceof Error ? err.message : 'Não consegui salvar.');
++    } finally {
++      setBusy(false);
++    }
++  }
++
++  async function excluir(id: string) {
++    if (!confirm('Apagar esse modelo?')) return;
++    await api.del(`/api/templates/${id}`);
++    await carregar();
++  }
++
++  async function marcarPadrao(t: Template) {
++    await api.put(`/api/templates/${t.id}`, {
++      name: t.name,
++      body: t.body,
++      ctas: t.ctas,
++      showImage: t.showImage,
++      isDefault: true,
++    });
++    await carregar();
++  }
++
++  return (
++    <>
++      <div className="head">
++        <div>
++          <h1>Modelos de mensagem</h1>
++          <p>
++            Textos reutilizáveis pros disparos em grupo: escreva uma vez com os tokens do produto no lugar certo
++            e deixe um pool de chamadas finais pra fechar a mensagem — uma sorteada a cada envio, pra não repetir
++            sempre a mesma linha.
++          </p>
++        </div>
++        <button className="btn" onClick={abrirNovo}>
++          Novo modelo
++        </button>
++      </div>
++
++      {erro && <div className="notice">{erro}</div>}
++
++      {editando && (
++        <div className="panel">
++          <h2 className="panel__title">{editando === 'novo' ? 'Novo modelo' : 'Editando modelo'}</h2>
++
++          <div className="row" style={{ marginBottom: 14 }}>
++            <div className="field" style={{ flex: '2 1 260px' }}>
++              <label htmlFor="nome">Nome</label>
++              <input
++                id="nome"
++                value={rascunho.name}
++                placeholder="Direto e agressivo"
++                onChange={(e) => setRascunho((r) => ({ ...r, name: e.target.value }))}
++              />
++            </div>
++            <label
++              className="field"
++              style={{ flex: '0 1 140px', flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 22 }}
++            >
++              <input
++                type="checkbox"
++                checked={rascunho.showImage}
++                onChange={(e) => setRascunho((r) => ({ ...r, showImage: e.target.checked }))}
++              />
++              <span>Anexar foto</span>
++            </label>
++            <label
++              className="field"
++              style={{ flex: '0 1 140px', flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 22 }}
++            >
++              <input
++                type="checkbox"
++                checked={rascunho.isDefault}
++                onChange={(e) => setRascunho((r) => ({ ...r, isDefault: e.target.checked }))}
++              />
++              <span>Padrão</span>
++            </label>
++          </div>
++
++          <div className="field" style={{ marginBottom: 8 }}>
++            <label>Inserir no texto</label>
++            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
++              {TOKENS.map((tok) => (
++                <button
++                  type="button"
++                  key={tok}
++                  className="chip"
++                  style={{ cursor: 'pointer', background: 'none' }}
++                  onClick={() => inserirToken(tok)}
++                >
++                  {tok}
++                </button>
++              ))}
++            </div>
++          </div>
++
++          <div className="split">
++            <div className="field">
++              <label htmlFor="body">Texto</label>
++              <textarea
++                id="body"
++                ref={textareaRef}
++                rows={12}
++                value={rascunho.body}
++                onChange={(e) => setRascunho((r) => ({ ...r, body: e.target.value }))}
++              />
++            </div>
++            <div className="field">
++              <label>Pré-visualização (dados de exemplo)</label>
++              <div className="notice" style={{ whiteSpace: 'pre-wrap', fontFamily: 'var(--mono)', fontSize: 13 }}>
++                {preview || 'Escreva o texto pra ver o resultado aqui.'}
++              </div>
++            </div>
++          </div>
++
++          <div className="field" style={{ marginTop: 14, marginBottom: 14 }}>
++            <label>Chamadas finais (CTA)</label>
++            <small style={{ display: 'block', marginBottom: 6 }}>
++              Uma é sorteada por envio, pra não repetir sempre a mesma linha. Pool vazio: nenhuma chamada entra
++              no texto.
++            </small>
++            <div className="row">
++              <div className="field" style={{ flex: '1 1 260px' }}>
++                <input
++                  value={novoCta}
++                  placeholder="Corre que acaba rápido!"
++                  onChange={(e) => setNovoCta(e.target.value)}
++                  onKeyDown={(e) => {
++                    if (e.key === 'Enter') {
++                      e.preventDefault();
++                      adicionarCta();
++                    }
++                  }}
++                />
++              </div>
++              <button type="button" className="btn btn--ghost" onClick={adicionarCta}>
++                Adicionar
++              </button>
++            </div>
++            {rascunho.ctas.length > 0 && (
++              <div className="taglist" style={{ marginTop: 8 }}>
++                {rascunho.ctas.map((c, i) => (
++                  <span className="taglist__item" key={i}>
++                    {c}
++                    <button
++                      type="button"
++                      onClick={() => removerCta(i)}
++                      aria-label={`Remover chamada "${c}"`}
++                      style={{
++                        marginLeft: 6,
++                        border: 'none',
++                        background: 'none',
++                        cursor: 'pointer',
++                        color: 'var(--muted)',
++                        fontWeight: 700,
++                      }}
++                    >
++                      ×
++                    </button>
++                  </span>
++                ))}
++              </div>
++            )}
++          </div>
++
++          <div style={{ display: 'flex', gap: 8 }}>
++            <button className="btn" disabled={busy} onClick={() => void salvar()}>
++              {busy ? 'Salvando...' : 'Salvar'}
++            </button>
++            <button className="btn btn--ghost" onClick={() => setEditando(null)}>
++              Cancelar
++            </button>
++          </div>
++        </div>
++      )}
++
++      {templates.length === 0 && !editando && (
++        <div className="empty">
++          <strong>Nenhum modelo criado</strong>
++          Clique em "Novo modelo" pra montar o texto que os disparos vão usar.
++        </div>
++      )}
++
++      {templates.map((t) => (
++        <div key={t.id} className="panel" style={{ marginBottom: 12 }}>
++          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
++            <div>
++              <h2 className="panel__title" style={{ marginBottom: 4 }}>
++                {t.name}
++                {t.isDefault && (
++                  <span className="chip" data-tone="on" style={{ marginLeft: 8 }}>
++                    padrão
++                  </span>
++                )}
++                {!t.showImage && (
++                  <span className="chip" style={{ marginLeft: 8 }}>
++                    sem foto
++                  </span>
++                )}
++              </h2>
++              <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
++                {t.ctas.length} chamada{t.ctas.length === 1 ? '' : 's'} no pool
++              </p>
++            </div>
++            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
++              {!t.isDefault && (
++                <button className="btn btn--ghost btn--sm" onClick={() => void marcarPadrao(t)}>
++                  Tornar padrão
++                </button>
++              )}
++              <button className="btn btn--ghost btn--sm" onClick={() => abrirEdicao(t)}>
++                Editar
++              </button>
++              <button className="btn btn--ghost btn--sm" onClick={() => void excluir(t.id)}>
++                Excluir
++              </button>
++            </div>
++          </div>
++        </div>
++      ))}
++    </>
++  );
++}
