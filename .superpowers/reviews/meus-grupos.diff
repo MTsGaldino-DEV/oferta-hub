@@ -1,0 +1,667 @@
+6465719 feat: pagina Meus Grupos com contagem de membros e historico de entrada/saida
+ .superpowers/meus-grupos-report.md | 152 +++++++++++++++++++++++++++++++++++++
+ apps/api/prisma/schema.prisma      |  25 ++++++
+ apps/api/src/routes/groups.ts      |  55 ++++++++++++++
+ apps/api/src/server.ts             |   2 +
+ apps/api/src/whatsapp/baileys.ts   |  38 +++++++++-
+ apps/web/src/App.tsx               |   2 +
+ apps/web/src/components/Layout.tsx |   8 +-
+ apps/web/src/pages/MeusGrupos.tsx  |  98 ++++++++++++++++++++++++
+ 8 files changed, 377 insertions(+), 3 deletions(-)
+diff --git a/.superpowers/meus-grupos-report.md b/.superpowers/meus-grupos-report.md
+new file mode 100644
+index 0000000..9c14ec6
+--- /dev/null
++++ b/.superpowers/meus-grupos-report.md
+@@ -0,0 +1,152 @@
++# Meus Grupos — report
++
++## Schema (NOT applied — see ruling at bottom)
++
++Two additive changes in `apps/api/prisma/schema.prisma`:
++
++- `WhatsappGroup.memberCount Int?` — current live member count, nullable
++  (never-synced groups have none yet).
++- New model `GroupMemberEvent` (`id`, `groupJid`, `participant`, `action`
++  enum `GroupMemberAction { ADD REMOVE }`, `occurredAt`), indexed
++  `@@index([groupJid, occurredAt])` for the range query the stats endpoint
++  needs. `///` doc-comments on both explain the why, matching the file's
++  existing voice.
++
++`npx prisma generate` was run from `apps/api` after the edit — client
++regenerated clean, no DB connection needed.
++
++## Event handler (`apps/api/src/whatsapp/baileys.ts`)
++
++Registered `this.sock.ev.on('group-participants.update', ...)` right after
++the existing `connection.update` listener in `connect()`, same
++registration pattern/placement.
++
++Payload shape confirmed against the installed package's own types
++(`node_modules/@whiskeysockets/baileys/lib/Types/Events.d.ts` /
++`GroupMetadata.d.ts`): `{ id, author, participants: string[], action:
++'add'|'remove'|'promote'|'demote'|'modify' }` — matches the brief exactly,
++plus a `modify` variant neither of us anticipated. The handler's guard is
++`if (action !== 'add' && action !== 'remove') return;`, so `promote`,
++`demote`, and `modify` all fall through untouched — only membership
++changes get logged. Traced all three paths by hand:
++- `add` → writes one `GroupMemberEvent` row per participant (`ADD`),
++  `memberCount` incremented by `participants.length`.
++- `remove` → same, `REMOVE`, decremented.
++- `promote` → guard returns immediately, nothing written, nothing
++  incremented.
++
++Whole handler body is wrapped in try/catch; catch only logs via `logger`
++and never rethrows, so a malformed event can't take the socket down.
++
++## `memberCount` consistency
++
++Two writers, no race:
++
++1. `syncGroups()` (full resync, runs on every `connection === 'open'`,
++   which fires on every boot per `main()`'s `whatsapp.connect()` call) —
++   now reads `meta.participants.length` from
++   `groupFetchAllParticipating()` and writes it as `memberCount` in both
++   the `upsert`'s `create` and `update`. This is a plain overwrite with
++   ground truth from the WhatsApp API.
++2. The event handler — does `prisma.whatsappGroup.updateMany({ where:
++   { jid }, data: { memberCount: { increment: delta } } })` inside a
++   `$transaction` alongside the `createMany` of event rows. `increment` on
++   `updateMany` compiles to a single atomic `UPDATE ... SET
++   "memberCount" = "memberCount" + $delta` — no `findUnique` + manual add,
++   so it can't lose an update racing a concurrent `syncGroups()` upsert;
++   whichever write lands second just applies cleanly on top of whatever
++   the first left behind.
++
++Edge case (not a bug, just worth flagging): if a `group-participants.update`
++event fires for a group that has never been through `syncGroups()` yet, the
++`updateMany` matches zero rows and does nothing — the group briefly has no
++`memberCount` row to increment. Self-heals on the next full sync. Not
++guarded against further since it can't crash anything and boot always
++calls `syncGroups()` first.
++
++## Honesty-note design
++
++`GET /api/groups?days=N` (new `apps/api/src/routes/groups.ts`, registered
++in `server.ts`'s authenticated block, alphabetically between
++`extensaoAdminRoutes` and `nichoRoutes`) returns per group: `name`,
++`memberCount`, `joined`/`left` counts from `GroupMemberEvent` clipped to
++the `days` window (same clamp convention as `stats.ts`: `Math.min(180,
++Math.max(1, ...))`, default 30), and `trackingSince` — the `occurredAt` of
++that group's **oldest logged event ever** (not clipped to the period), or
++`null` if the group has no events yet. Computed via `groupBy` with `_min`,
++parallelized with the join/leave counts through `Promise.all` — no N+1.
++
++Frontend (`apps/web/src/pages/MeusGrupos.tsx`) surfaces this directly in
++the table, one column per group ("Rastreando desde: desde DD/MM/AAAA" or
++"ainda sem histórico" in muted text), plus a standing caption below the
++table: *"Entradas e saídas só contam a partir de quando essa métrica
++passou a ser registrada (...) — período anterior a isso não é zero, é
++desconhecido."* Not a tooltip — always visible under the table.
++
++## Frontend
++
++New `apps/web/src/pages/MeusGrupos.tsx`: `.head` block with title/subtitle
+++ 7/30/90-day `<select>` (same markup as `Desempenho.tsx`), one `.panel`
++with a `.table` (mirrors the platforms table in `Desempenho.tsx`) — columns
++Grupo / Membros / Entraram / Saíram / Rastreando desde. Join/leave counts
++get a `+`/`-` prefix colored via `var(--gain)`/`var(--drop)` inline
++(only when non-zero) — reused the existing `.kpi__delta[data-dir]` color
++tokens directly rather than adding a new CSS class, since nothing in
++`styles.css` already renders an up/down indicator inside a table cell.
++Empty state reuses the exact two-line `.empty` voice from
++`Automacoes.tsx` ("Nenhum grupo sincronizado" / "Conecte o WhatsApp e
++sincronize os grupos em Conexões...").
++
++Wired into `apps/web/src/App.tsx` (`/grupos` route) and
++`apps/web/src/components/Layout.tsx`'s nav — added to the existing
++**"Métricas"** group alongside "Desempenho", since this is unambiguously a
++metrics page (member counts + join/leave over a period), not automation
++config.
++
++## Build result
++
++`npx prisma generate` (apps/api): clean, no DB connection required.
++`npm run build` from worktree root: both workspaces exit 0 — `tsc -p
++tsconfig.json` for the API, `tsc -b && vite build` for the web app (51
++modules, no type errors).
++
++## Self-review findings
++
++- Verified the Baileys event payload shape against the actually-installed
++  package's `.d.ts` files rather than trusting the brief blind — matched,
++  plus the extra `modify` action, which the existing `!== 'add' && !==
++  'remove'` guard already excludes correctly.
++- Caught and fixed one mistake made mid-edit: an initial sloppy `Edit` call
++  split the `connection.update` callback's `if (connection === 'close')`
++  block in half while trying to insert the new listener, leaving dead code
++  (`connection.update.close` on a fake `if (false)`). Caught by re-reading
++  the file immediately after the edit (before building) and rewrote the
++  whole `connect()` body cleanly in one corrected `Edit` — the version that
++  got built and committed is the clean one; confirmed by re-reading the
++  full block afterward.
++- `apps/api/src/routes/groups.ts` uses `Promise.all` across four parallel
++  Prisma queries (groups, add-counts, remove-counts, oldest-per-group) —
++  no per-group query loop.
++- No new npm dependency, no new CSS class, no speculative config.
++
++## Concerns
++
++- No automated test exists for the increment/decrement logic (project has
++  no test runner configured per `CLAUDE.md`, and the hard constraints here
++  forbid running the dev server or touching the DB, so nothing here is
++  runnable inside this sandbox anyway). Recommend a manual smoke check
++  after deploy: watch the API logs for one real group-join/leave event and
++  confirm a `GroupMemberEvent` row lands and `memberCount` moves by 1.
++- The zero-rows-matched edge case (event before first sync) is silently a
++  no-op, not silently wrong — flagged above, not fixed, since fixing it
++  would mean either a speculative upsert-on-event (extra write path,
++  unrequested) or blocking on a full resync (slower, unrequested). Leaving
++  it as "self-heals on next boot" is the surgical option.
++
++## Schema is NOT applied
++
++`prisma generate` was run (client regenerated, needed for typecheck).
++`prisma db push`/`migrate` was **not** run — no `DATABASE_URL` connection
++was made, and the live Postgres schema is untouched. The controller must
++review the two additive schema changes above and apply them (`db push` or
++a migration) before this feature is live.
+diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
+index c3bb592..f4df53a 100644
+--- a/apps/api/prisma/schema.prisma
++++ b/apps/api/prisma/schema.prisma
+@@ -311,33 +311,58 @@ model NicheCategory {
+ }
+ 
+ /// Chave/valor para configuracao do app. Hoje guarda o token da extensao;
+ /// serve tambem para as preferencias de mensagem.
+ model AppSetting {
+   key       String   @id
+   value     String
+   updatedAt DateTime @updatedAt
+ }
+ 
+ model WhatsappGroup {
+   id        String   @id @default(cuid())
+   jid       String   @unique
+   name      String
+   isDefault Boolean  @default(false)
++  /// Contagem atual de membros. Preenchida no syncGroups() completo (a cada
++  /// boot) e ajustada incrementalmente pelo evento group-participants.update
++  /// entre um sync e outro -- ver whatsapp/baileys.ts.
++  memberCount Int?
+   updatedAt DateTime @updatedAt
+ }
+ 
++enum GroupMemberAction {
++  ADD
++  REMOVE
++}
++
++/// Log de entrada/saida de membro, evento a evento. Existe porque uma
++/// contagem antes/depois esconde movimento: se 3 entram e 3 saem no mesmo
++/// dia, o total nao muda, mas "quantos entraram" so da pra responder com o
++/// evento de verdade, nao com a foto do antes/depois. So comeca a acumular a
++/// partir do deploy dessa feature -- entrada/saida anteriores a isso sao
++/// desconhecidas, nao zero (ver GET /api/groups e o campo trackingSince).
++model GroupMemberEvent {
++  id          String            @id @default(cuid())
++  groupJid    String
++  participant String
++  action      GroupMemberAction
++  occurredAt  DateTime          @default(now())
++
++  @@index([groupJid, occurredAt])
++}
++
+ /// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}
+ /// {PRECO_ANTIGO} {LINK} {CUPOM}) trocados pelos dados da oferta na hora do
+ /// envio. `ctas` e um pool de chamadas finais -- uma sorteada por envio, pra
+ /// nao repetir sempre a mesma linha. Ainda nao e usado por nada: existe pra
+ /// alimentar a futura tela de Disparos.
+ model MessageTemplate {
+   id        String   @id @default(cuid())
+   name      String   @unique
+   body      String
+   ctas      String[] @default([])
+   showImage Boolean  @default(true)
+   isDefault Boolean  @default(false)
+   createdAt DateTime @default(now())
+   updatedAt DateTime @updatedAt
+ 
+diff --git a/apps/api/src/routes/groups.ts b/apps/api/src/routes/groups.ts
+new file mode 100644
+index 0000000..6e7b832
+--- /dev/null
++++ b/apps/api/src/routes/groups.ts
+@@ -0,0 +1,55 @@
++import type { FastifyInstance } from 'fastify';
++import { prisma } from '../db.js';
++
++const DAY_MS = 24 * 60 * 60 * 1000;
++
++export async function groupRoutes(app: FastifyInstance) {
++  /**
++   * Contagem atual de membros + entradas/saidas no periodo, por grupo.
++   *
++   * `trackingSince`: data do evento mais antigo logado pro grupo (todo o
++   * historico, nao so o periodo pedido), ou null se nunca logou nada. O log
++   * de GroupMemberEvent so comeca a acumular a partir do deploy dessa
++   * feature -- entrada/saida antes disso e desconhecida, nao zero. O front
++   * usa esse campo pra avisar isso em vez de mostrar "0 entradas" como se
++   * fosse um fato sobre um periodo que a gente nunca mediu.
++   */
++  app.get<{ Querystring: { days?: string } }>('/api/groups', async (req) => {
++    const days = Math.min(180, Math.max(1, Number(req.query.days ?? 30)));
++    const since = new Date(Date.now() - days * DAY_MS);
++
++    const [groups, addCounts, removeCounts, oldestEvents] = await Promise.all([
++      prisma.whatsappGroup.findMany({ orderBy: { name: 'asc' } }),
++      prisma.groupMemberEvent.groupBy({
++        by: ['groupJid'],
++        where: { action: 'ADD', occurredAt: { gte: since } },
++        _count: true,
++      }),
++      prisma.groupMemberEvent.groupBy({
++        by: ['groupJid'],
++        where: { action: 'REMOVE', occurredAt: { gte: since } },
++        _count: true,
++      }),
++      prisma.groupMemberEvent.groupBy({
++        by: ['groupJid'],
++        _min: { occurredAt: true },
++      }),
++    ]);
++
++    const addByJid = new Map(addCounts.map((c) => [c.groupJid, c._count]));
++    const removeByJid = new Map(removeCounts.map((c) => [c.groupJid, c._count]));
++    const oldestByJid = new Map(oldestEvents.map((c) => [c.groupJid, c._min.occurredAt]));
++
++    return {
++      days,
++      groups: groups.map((g) => ({
++        jid: g.jid,
++        name: g.name,
++        memberCount: g.memberCount,
++        joined: addByJid.get(g.jid) ?? 0,
++        left: removeByJid.get(g.jid) ?? 0,
++        trackingSince: oldestByJid.get(g.jid) ?? null,
++      })),
++    };
++  });
++}
+diff --git a/apps/api/src/server.ts b/apps/api/src/server.ts
+index ea6555a..748121c 100644
+--- a/apps/api/src/server.ts
++++ b/apps/api/src/server.ts
+@@ -1,27 +1,28 @@
+ import cookie from '@fastify/cookie';
+ import cors from '@fastify/cors';
+ import Fastify from 'fastify';
+ import { ZodError } from 'zod';
+ import { env } from './env.js';
+ import { prisma } from './db.js';
+ import { logger } from './lib/logger.js';
+ import { authRoutes, requireAuth } from './plugins/auth.js';
+ import { automacaoRoutes } from './routes/automacoes.js';
+ import { credentialRoutes } from './routes/credentials.js';
+ import { disparoRoutes } from './routes/disparos.js';
+ import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
++import { groupRoutes } from './routes/groups.js';
+ import { nichoRoutes } from './routes/nichos.js';
+ import { offerRoutes } from './routes/offers.js';
+ import { redirectRoutes } from './routes/redirect.js';
+ import { statsRoutes } from './routes/stats.js';
+ import { templateRoutes } from './routes/templates.js';
+ import { watchRoutes } from './routes/watch.js';
+ import { whatsappRoutes } from './routes/whatsapp.js';
+ import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
+ import { whatsapp } from './whatsapp/baileys.js';
+ 
+ const app = Fastify({ logger: false, trustProxy: true });
+ 
+ // Precisa vir ANTES de qualquer plugin/rota: o Fastify amarra o handler de
+ // erro a cada rota no momento em que ela e registrada, nao dinamicamente --
+ // declarado depois (como estava), nenhuma rota do app usava esse handler, e
+@@ -63,30 +64,31 @@ app.get('/health', async () => ({ ok: true, whatsapp: whatsapp.status }));
+ // Publico: o link curto precisa abrir sem login.
+ await app.register(redirectRoutes);
+ await app.register(authRoutes);
+ 
+ // A extensao autentica por token no header, nao por cookie -- fica fora do
+ // bloco de sessao.
+ await app.register(extensaoRoutes);
+ 
+ // Tudo abaixo exige sessao.
+ await app.register(async (instance) => {
+   instance.addHook('onRequest', requireAuth);
+   await instance.register(automacaoRoutes);
+   await instance.register(credentialRoutes);
+   await instance.register(disparoRoutes);
+   await instance.register(extensaoAdminRoutes);
++  await instance.register(groupRoutes);
+   await instance.register(nichoRoutes);
+   await instance.register(offerRoutes);
+   await instance.register(statsRoutes);
+   await instance.register(templateRoutes);
+   await instance.register(watchRoutes);
+   await instance.register(whatsappRoutes);
+ 
+   // Disparo manual dos workers, pra testar sem esperar o cron.
+   // Espera terminar e devolve o resumo: sem isso o clique e indistinguivel de
+   // nada acontecer quando a lista esta vazia ou a plataforma recusa.
+   instance.post('/api/jobs/price-monitor', async () => ({ ok: true, ...(await runPriceMonitor()) }));
+   instance.post('/api/jobs/discovery', async () => ({ ok: true, ...(await runDiscovery()) }));
+   instance.post('/api/jobs/category-sync', async () => ({ ok: true, ...(await runCategorySync()) }));
+ });
+ 
+diff --git a/apps/api/src/whatsapp/baileys.ts b/apps/api/src/whatsapp/baileys.ts
+index c3c07f9..427d83a 100644
+--- a/apps/api/src/whatsapp/baileys.ts
++++ b/apps/api/src/whatsapp/baileys.ts
+@@ -140,30 +140,63 @@ class WhatsAppService {
+         const loggedOut = code === DisconnectReason.loggedOut;
+         this.status = 'disconnected';
+         this.sock = null;
+ 
+         if (loggedOut) {
+           // A credencial ja nao vale nada -- guardar ela so trava o app num
+           // laco de "desconectado" sem QR. Limpa e deixa pronto pra parear.
+           await this.limparSessao();
+           logger.error('Sessao encerrada no aparelho. Abra Conexoes e leia o QR pra parear de novo.');
+         } else {
+           logger.warn({ code }, 'conexao caiu, reconectando em 5s');
+           setTimeout(() => void this.connect(), 5000);
+         }
+       }
+     });
++
++    // Entrada/saida de membro em qualquer grupo. So `add`/`remove` sao
++    // movimento de membro de verdade -- `promote`/`demote` sao mudanca de
++    // admin, nao entram no log (ver doc do model GroupMemberEvent).
++    //
++    // Handler roda dentro do socket do Baileys: qualquer excecao aqui pode
++    // derrubar a conexao usada pra enviar oferta, por isso tudo dentro de
++    // try/catch e nada relancado.
++    this.sock.ev.on('group-participants.update', async (update) => {
++      try {
++        const { id: groupJid, participants, action } = update;
++        if (action !== 'add' && action !== 'remove') return;
++
++        const delta = action === 'add' ? participants.length : -participants.length;
++        await prisma.$transaction([
++          prisma.groupMemberEvent.createMany({
++            data: participants.map((participant) => ({
++              groupJid,
++              participant,
++              action: action === 'add' ? 'ADD' : 'REMOVE',
++            })),
++          }),
++          // increment/decrement atomico -- sem findUnique + soma na mao, pra
++          // nao perder update se um syncGroups() completo rodar junto.
++          prisma.whatsappGroup.updateMany({
++            where: { jid: groupJid },
++            data: { memberCount: { increment: delta } },
++          }),
++        ]);
++      } catch (err) {
++        logger.error({ err: String(err) }, 'falha ao registrar entrada/saida de grupo');
++      }
++    });
+   }
+ 
+   /**
+    * Encerra a sessao e apaga as credenciais do disco.
+    *
+    * Apagar e o ponto: sem isso, uma sessao morta fica para sempre. O Baileys
+    * reusa a credencial salva, o servidor recusa, e o app volta a "desconectado"
+    * sem nunca gerar QR -- nao ha como parear de novo.
+    */
+   async logout() {
+     await this.sock?.logout().catch(() => undefined);
+     this.encerrarSocket();
+     await this.limparSessao();
+   }
+ 
+@@ -194,34 +227,35 @@ class WhatsAppService {
+         await fs.rm(`${env.wa.stateDir}/${nome}`, { recursive: true, force: true });
+         apagados++;
+       }
+     } catch (err) {
+       logger.error({ dir: env.wa.stateDir, err: String(err) }, 'nao consegui apagar a sessao');
+       throw new Error(`Nao consegui apagar a sessao em ${env.wa.stateDir}: ${String(err)}`);
+     }
+     logger.info({ dir: env.wa.stateDir, apagados }, 'sessao do WhatsApp apagada');
+   }
+ 
+   /** Guarda os grupos onde o numero esta, pra voce escolher o destino no dashboard. */
+   async syncGroups() {
+     if (!this.sock) return;
+     const groups = await this.sock.groupFetchAllParticipating();
+     for (const [jid, meta] of Object.entries(groups)) {
++      const memberCount = meta.participants.length;
+       await prisma.whatsappGroup.upsert({
+         where: { jid },
+-        create: { jid, name: meta.subject },
+-        update: { name: meta.subject },
++        create: { jid, name: meta.subject, memberCount },
++        update: { name: meta.subject, memberCount },
+       });
+     }
+     logger.info({ count: Object.keys(groups).length }, 'grupos sincronizados');
+   }
+ 
+   private async checkQuota() {
+     const day = new Date().toISOString().slice(0, 10);
+     const log = await prisma.sendLog.upsert({
+       where: { day },
+       create: { day, count: 0 },
+       update: {},
+     });
+     if (log.count >= env.wa.dailyCap) {
+       throw new WhatsAppRetryableError(
+         `Teto diario de ${env.wa.dailyCap} envios atingido. Isso e proposital: passar disso e o caminho mais rapido pro ban.`,
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index 05d83a7..7fd718c 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -1,23 +1,24 @@
+ import { useEffect, useState } from 'react';
+ import { Route, Routes } from 'react-router-dom';
+ import { api } from './api.js';
+ import { Layout } from './components/Layout.js';
+ import { Logo } from './components/Logo.js';
+ import { VisaoGeral } from './pages/VisaoGeral.js';
+ import { Fila } from './pages/Fila.js';
+ import { Desempenho } from './pages/Desempenho.js';
++import { MeusGrupos } from './pages/MeusGrupos.js';
+ import { Nichos } from './pages/Nichos.js';
+ import { Produtos } from './pages/Produtos.js';
+ import { Agenda } from './pages/Agenda.js';
+ import { Automacoes } from './pages/Automacoes.js';
+ import { Disparos } from './pages/Disparos.js';
+ import { Templates } from './pages/Templates.js';
+ import { Conexoes } from './pages/Conexoes.js';
+ 
+ function Login({ onIn }: { onIn: () => void }) {
+   const [password, setPassword] = useState('');
+   const [error, setError] = useState<string | null>(null);
+   const [busy, setBusy] = useState(false);
+ 
+   async function submit() {
+     setBusy(true);
+@@ -72,26 +73,27 @@ export default function App() {
+     api
+       .get<{ authenticated: boolean }>('/api/me')
+       .then((r) => setAuth(r.authenticated))
+       .catch(() => setAuth(false));
+   }, []);
+ 
+   if (auth === null) return null;
+   if (!auth) return <Login onIn={() => setAuth(true)} />;
+ 
+   return (
+     <Layout>
+       <Routes>
+         <Route path="/" element={<VisaoGeral />} />
+         <Route path="/fila" element={<Fila />} />
+         <Route path="/desempenho" element={<Desempenho />} />
++        <Route path="/grupos" element={<MeusGrupos />} />
+         <Route path="/produtos" element={<Produtos />} />
+         <Route path="/nichos" element={<Nichos />} />
+         <Route path="/agenda" element={<Agenda />} />
+         <Route path="/automacoes" element={<Automacoes />} />
+         <Route path="/disparos" element={<Disparos />} />
+         <Route path="/templates" element={<Templates />} />
+         <Route path="/conexoes" element={<Conexoes />} />
+       </Routes>
+     </Layout>
+   );
+ }
+diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
+index 3537873..265bd52 100644
+--- a/apps/web/src/components/Layout.tsx
++++ b/apps/web/src/components/Layout.tsx
+@@ -12,31 +12,37 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
+     label: 'Catálogo',
+     items: [
+       { to: '/nichos', label: 'Nichos' },
+       { to: '/produtos', label: 'Preços vigiados' },
+     ],
+   },
+   {
+     label: 'Automação',
+     items: [
+       { to: '/agenda', label: 'Agenda' },
+       { to: '/automacoes', label: 'Automações' },
+       { to: '/disparos', label: 'Disparos' },
+       { to: '/templates', label: 'Modelos' },
+     ],
+   },
+-  { label: 'Métricas', items: [{ to: '/desempenho', label: 'Desempenho' }] },
++  {
++    label: 'Métricas',
++    items: [
++      { to: '/desempenho', label: 'Desempenho' },
++      { to: '/grupos', label: 'Meus Grupos' },
++    ],
++  },
+   { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
+ ];
+ 
+ export function Layout({ children }: { children: React.ReactNode }) {
+   const [pending, setPending] = useState(0);
+   const [wa, setWa] = useState<{ status: string; quota: { used: number; cap: number } } | null>(null);
+   const location = useLocation();
+ 
+   useEffect(() => {
+     api.get<{ pending: number }>('/api/stats/overview?days=30').then((s) => setPending(s.pending)).catch(() => {});
+     api.get<any>('/api/whatsapp/status').then(setWa).catch(() => {});
+   }, [location.pathname]);
+ 
+   const online = wa?.status === 'connected';
+ 
+diff --git a/apps/web/src/pages/MeusGrupos.tsx b/apps/web/src/pages/MeusGrupos.tsx
+new file mode 100644
+index 0000000..7587970
+--- /dev/null
++++ b/apps/web/src/pages/MeusGrupos.tsx
+@@ -0,0 +1,98 @@
++import { useEffect, useState } from 'react';
++import { api, int } from '../api.js';
++
++interface GroupRow {
++  jid: string;
++  name: string;
++  memberCount: number | null;
++  joined: number;
++  left: number;
++  trackingSince: string | null;
++}
++
++interface GroupsResponse {
++  days: number;
++  groups: GroupRow[];
++}
++
++export function MeusGrupos() {
++  const [days, setDays] = useState(30);
++  const [groups, setGroups] = useState<GroupRow[] | null>(null);
++
++  useEffect(() => {
++    void api
++      .get<GroupsResponse>(`/api/groups?days=${days}`)
++      .then((r) => setGroups(r.groups))
++      .catch(() => setGroups([]));
++  }, [days]);
++
++  return (
++    <>
++      <div className="head">
++        <div>
++          <h1>Meus Grupos</h1>
++          <p>Quantos membros cada grupo tem agora, e quantos entraram ou saíram no período escolhido.</p>
++        </div>
++        <div className="field" style={{ width: 180 }}>
++          <label htmlFor="days">Período</label>
++          <select id="days" value={days} onChange={(e) => setDays(Number(e.target.value))}>
++            <option value={7}>Últimos 7 dias</option>
++            <option value={30}>Últimos 30 dias</option>
++            <option value={90}>Últimos 90 dias</option>
++          </select>
++        </div>
++      </div>
++
++      <div className="panel">
++        <h2 className="panel__title">Grupos</h2>
++        {groups === null ? null : groups.length === 0 ? (
++          <div className="empty">
++            <strong>Nenhum grupo sincronizado</strong>
++            Conecte o WhatsApp e sincronize os grupos em Conexões para ver as métricas aqui.
++          </div>
++        ) : (
++          <>
++            <table className="table">
++              <thead>
++                <tr>
++                  <th>Grupo</th>
++                  <th className="num">Membros</th>
++                  <th className="num">Entraram</th>
++                  <th className="num">Saíram</th>
++                  <th>Rastreando desde</th>
++                </tr>
++              </thead>
++              <tbody>
++                {groups.map((g) => (
++                  <tr key={g.jid}>
++                    <td>
++                      <strong>{g.name}</strong>
++                    </td>
++                    <td className="num">{g.memberCount ?? '—'}</td>
++                    <td className="num" style={g.joined ? { color: 'var(--gain)' } : undefined}>
++                      {g.joined ? `+${int(g.joined)}` : 0}
++                    </td>
++                    <td className="num" style={g.left ? { color: 'var(--drop)' } : undefined}>
++                      {g.left ? `-${int(g.left)}` : 0}
++                    </td>
++                    <td>
++                      {g.trackingSince ? (
++                        `desde ${new Date(g.trackingSince).toLocaleDateString('pt-BR')}`
++                      ) : (
++                        <span style={{ color: 'var(--muted)' }}>ainda sem histórico</span>
++                      )}
++                    </td>
++                  </tr>
++                ))}
++              </tbody>
++            </table>
++            <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 10 }}>
++              Entradas e saídas só contam a partir de quando essa métrica passou a ser registrada (veja
++              "Rastreando desde" de cada grupo) — período anterior a isso não é zero, é desconhecido.
++            </p>
++          </>
++        )}
++      </div>
++    </>
++  );
++}

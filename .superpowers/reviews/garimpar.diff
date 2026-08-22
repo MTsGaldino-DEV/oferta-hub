@@ -1,0 +1,427 @@
+2a80e9b feat(web): aba Garimpar para navegar produtos da Shopee por categoria
+ .superpowers/garimpar-report.md    |  20 +++++
+ apps/api/src/routes/garimpar.ts    |  47 ++++++++++
+ apps/api/src/server.ts             |   2 +
+ apps/web/src/App.tsx               |   2 +
+ apps/web/src/components/Layout.tsx |   1 +
+ apps/web/src/pages/Garimpar.tsx    | 180 +++++++++++++++++++++++++++++++++++++
+ 6 files changed, 252 insertions(+)
+diff --git a/.superpowers/garimpar-report.md b/.superpowers/garimpar-report.md
+new file mode 100644
+index 0000000..e3bfee9
+--- /dev/null
++++ b/.superpowers/garimpar-report.md
+@@ -0,0 +1,20 @@
++# Garimpar — relatorio
++
++## Arquivos alterados
++- `apps/api/src/routes/garimpar.ts` (novo) — `GET /api/garimpar/produtos`
++- `apps/api/src/server.ts` — registro de `garimparRoutes` (alfabetico, entre `extensaoAdminRoutes` e `groupRoutes`)
++- `apps/web/src/pages/Garimpar.tsx` (novo)
++- `apps/web/src/App.tsx` — rota `/garimpar`
++- `apps/web/src/components/Layout.tsx` — item "Garimpar" no grupo Catalogo (primeiro, antes de Nichos)
++
++## Build
++- `npm run build --workspace=apps/api` — OK (tsc limpo)
++- `npm run build --workspace=apps/web` — OK (`tsc -b && vite build`, sem erros)
++
++## Decisoes nao explicitas no brief
++- Destaque da categoria selecionada: sem classe CSS pronta pra "picked" dentro do `.catbox`, apliquei `style` inline (`background: rgba(22,23,26,.06)` + `fontWeight: 700`) direto no `.catbox__item` quando `categoriaId === f.id` — mesmo padrao de estilo inline ja usado em `Nichos.tsx`, sem tocar `styles.css`.
++- Categoria selecionada virou `<div className="catbox__item" onClick=...>` em vez do `<label>` com checkbox que `Nichos.tsx` usa (aqui e single-select, nao multi-select).
++- Arredondamento do desconto: `Math.round((1 - price/listPrice) * 100)`, mesmo estilo dos outros `%` da tela (sem casas decimais).
++- Estado de carregamento: reaproveitei o bloco `.empty` pra mensagem "Buscando..." em vez de criar um spinner/classe nova.
++- `sort` e `limit` na query da API sao validados com Zod (`categoryId` obrigatorio positivo, `sort` enum das 5 opcoes default `vendas`, `limit` 1-60 default 40) — erros de validacao caem no `setErrorHandler` global do Fastify (ZodError -> 400), entao a rota nao precisou de try/catch propria pra isso; o try/catch cobre so a chamada ao connector, como pedido.
++- Nao toquei em `.superpowers/overnight-progress.md` nem nos `.diff` soltos em `.superpowers/reviews/` que ja estavam modificados/untracked no worktree antes desta tarefa — ficam de fora do commit.
+diff --git a/apps/api/src/routes/garimpar.ts b/apps/api/src/routes/garimpar.ts
+new file mode 100644
+index 0000000..8692035
+--- /dev/null
++++ b/apps/api/src/routes/garimpar.ts
+@@ -0,0 +1,47 @@
++import { Platform } from '@prisma/client';
++import type { FastifyInstance } from 'fastify';
++import { z } from 'zod';
++import { prisma } from '../db.js';
++import { connectors } from '../connectors/index.js';
++
++const query = z.object({
++  categoryId: z.coerce.number().int().positive(),
++  sort: z.enum(['relevancia', 'vendas', 'comissao', 'menor-preco', 'desconto']).default('vendas'),
++  limit: z.coerce.number().int().min(1).max(60).default(40),
++});
++
++export async function garimparRoutes(app: FastifyInstance) {
++  /** Navega os produtos de uma categoria da Shopee, direto na API de busca ao vivo. */
++  app.get<{ Querystring: { categoryId?: string; sort?: string; limit?: string } }>(
++    '/api/garimpar/produtos',
++    async (req, reply) => {
++      const { categoryId, sort, limit } = query.parse(req.query);
++
++      try {
++        const produtos = await connectors[Platform.SHOPEE].search({ categoryId, sort, limit });
++
++        const cat = await prisma.category.findUnique({
++          where: { platform_externalId: { platform: Platform.SHOPEE, externalId: categoryId } },
++        });
++
++        return {
++          ok: true,
++          categoria: cat?.nameBr ?? null,
++          produtos: produtos.map((p) => ({
++            externalId: p.externalId,
++            platform: p.platform,
++            title: p.title,
++            imageUrl: p.imageUrl,
++            price: p.price,
++            listPrice: p.listPrice,
++            commissionPct: p.commissionPct,
++            soldCount: p.soldCount,
++            rating: p.rating,
++          })),
++        };
++      } catch (err) {
++        return reply.code(400).send({ error: err instanceof Error ? err.message : 'Busca falhou.' });
++      }
++    },
++  );
++}
+diff --git a/apps/api/src/server.ts b/apps/api/src/server.ts
+index 748121c..eef8b00 100644
+--- a/apps/api/src/server.ts
++++ b/apps/api/src/server.ts
+@@ -1,27 +1,28 @@
+ import cookie from '@fastify/cookie';
+ import cors from '@fastify/cors';
+ import Fastify from 'fastify';
+ import { ZodError } from 'zod';
+ import { env } from './env.js';
+ import { prisma } from './db.js';
+ import { logger } from './lib/logger.js';
+ import { authRoutes, requireAuth } from './plugins/auth.js';
+ import { automacaoRoutes } from './routes/automacoes.js';
+ import { credentialRoutes } from './routes/credentials.js';
+ import { disparoRoutes } from './routes/disparos.js';
+ import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
++import { garimparRoutes } from './routes/garimpar.js';
+ import { groupRoutes } from './routes/groups.js';
+ import { nichoRoutes } from './routes/nichos.js';
+ import { offerRoutes } from './routes/offers.js';
+ import { redirectRoutes } from './routes/redirect.js';
+ import { statsRoutes } from './routes/stats.js';
+ import { templateRoutes } from './routes/templates.js';
+ import { watchRoutes } from './routes/watch.js';
+ import { whatsappRoutes } from './routes/whatsapp.js';
+ import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
+ import { whatsapp } from './whatsapp/baileys.js';
+ 
+ const app = Fastify({ logger: false, trustProxy: true });
+ 
+ // Precisa vir ANTES de qualquer plugin/rota: o Fastify amarra o handler de
+ // erro a cada rota no momento em que ela e registrada, nao dinamicamente --
+@@ -64,30 +65,31 @@ app.get('/health', async () => ({ ok: true, whatsapp: whatsapp.status }));
+ // Publico: o link curto precisa abrir sem login.
+ await app.register(redirectRoutes);
+ await app.register(authRoutes);
+ 
+ // A extensao autentica por token no header, nao por cookie -- fica fora do
+ // bloco de sessao.
+ await app.register(extensaoRoutes);
+ 
+ // Tudo abaixo exige sessao.
+ await app.register(async (instance) => {
+   instance.addHook('onRequest', requireAuth);
+   await instance.register(automacaoRoutes);
+   await instance.register(credentialRoutes);
+   await instance.register(disparoRoutes);
+   await instance.register(extensaoAdminRoutes);
++  await instance.register(garimparRoutes);
+   await instance.register(groupRoutes);
+   await instance.register(nichoRoutes);
+   await instance.register(offerRoutes);
+   await instance.register(statsRoutes);
+   await instance.register(templateRoutes);
+   await instance.register(watchRoutes);
+   await instance.register(whatsappRoutes);
+ 
+   // Disparo manual dos workers, pra testar sem esperar o cron.
+   // Espera terminar e devolve o resumo: sem isso o clique e indistinguivel de
+   // nada acontecer quando a lista esta vazia ou a plataforma recusa.
+   instance.post('/api/jobs/price-monitor', async () => ({ ok: true, ...(await runPriceMonitor()) }));
+   instance.post('/api/jobs/discovery', async () => ({ ok: true, ...(await runDiscovery()) }));
+   instance.post('/api/jobs/category-sync', async () => ({ ok: true, ...(await runCategorySync()) }));
+ });
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index 64c97d7..d3579b5 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -1,24 +1,25 @@
+ import { useEffect, useState } from 'react';
+ import { Route, Routes } from 'react-router-dom';
+ import { api } from './api.js';
+ import { Layout } from './components/Layout.js';
+ import { Logo } from './components/Logo.js';
+ import { VisaoGeral } from './pages/VisaoGeral.js';
+ import { Fila } from './pages/Fila.js';
+ import { Desempenho } from './pages/Desempenho.js';
+ import { MeusGrupos } from './pages/MeusGrupos.js';
++import { Garimpar } from './pages/Garimpar.js';
+ import { Nichos } from './pages/Nichos.js';
+ import { Produtos } from './pages/Produtos.js';
+ import { Agenda } from './pages/Agenda.js';
+ import { Automacoes } from './pages/Automacoes.js';
+ import { Disparos } from './pages/Disparos.js';
+ import { Configuracoes } from './pages/Configuracoes.js';
+ 
+ function Login({ onIn }: { onIn: () => void }) {
+   const [password, setPassword] = useState('');
+   const [error, setError] = useState<string | null>(null);
+   const [busy, setBusy] = useState(false);
+ 
+   async function submit() {
+     setBusy(true);
+     setError(null);
+@@ -75,23 +76,24 @@ export default function App() {
+       .catch(() => setAuth(false));
+   }, []);
+ 
+   if (auth === null) return null;
+   if (!auth) return <Login onIn={() => setAuth(true)} />;
+ 
+   return (
+     <Layout>
+       <Routes>
+         <Route path="/" element={<VisaoGeral />} />
+         <Route path="/fila" element={<Fila />} />
+         <Route path="/desempenho" element={<Desempenho />} />
+         <Route path="/grupos" element={<MeusGrupos />} />
+         <Route path="/produtos" element={<Produtos />} />
+         <Route path="/nichos" element={<Nichos />} />
++        <Route path="/garimpar" element={<Garimpar />} />
+         <Route path="/agenda" element={<Agenda />} />
+         <Route path="/automacoes" element={<Automacoes />} />
+         <Route path="/disparos" element={<Disparos />} />
+         <Route path="/configuracoes" element={<Configuracoes />} />
+       </Routes>
+     </Layout>
+   );
+ }
+diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
+index 5c6ce28..00c1630 100644
+--- a/apps/web/src/components/Layout.tsx
++++ b/apps/web/src/components/Layout.tsx
+@@ -1,28 +1,29 @@
+ import { NavLink, useLocation } from 'react-router-dom';
+ import { useEffect, useState } from 'react';
+ import { api } from '../api.js';
+ import { Logo } from './Logo.js';
+ 
+ type NavLinkDef = { to: string; label: string; end?: boolean };
+ 
+ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
+   { label: null, items: [{ to: '/', label: 'Visão geral', end: true }] },
+   { label: null, items: [{ to: '/fila', label: 'Fila' }] },
+   {
+     label: 'Catálogo',
+     items: [
++      { to: '/garimpar', label: 'Garimpar' },
+       { to: '/nichos', label: 'Nichos' },
+       { to: '/produtos', label: 'Preços vigiados' },
+     ],
+   },
+   {
+     label: 'Automação',
+     items: [
+       { to: '/agenda', label: 'Agenda' },
+       { to: '/automacoes', label: 'Automações' },
+       { to: '/disparos', label: 'Disparos' },
+     ],
+   },
+   {
+     label: 'Métricas',
+     items: [
+diff --git a/apps/web/src/pages/Garimpar.tsx b/apps/web/src/pages/Garimpar.tsx
+new file mode 100644
+index 0000000..ba5b688
+--- /dev/null
++++ b/apps/web/src/pages/Garimpar.tsx
+@@ -0,0 +1,180 @@
++import { useEffect, useState } from 'react';
++import { api, brl, int } from '../api.js';
++
++interface Raiz {
++  id: number;
++  nome: string;
++  itens: number;
++  filhas: { id: number; nome: string; itens: number }[];
++}
++
++interface Produto {
++  externalId: string;
++  title: string;
++  imageUrl: string | null;
++  price: number | null;
++  listPrice: number | null;
++  commissionPct: number | null;
++  soldCount: number | null;
++  rating: number | null;
++}
++
++interface Resultado {
++  categoria: string | null;
++  produtos: Produto[];
++}
++
++const ORDENS = [
++  { valor: 'vendas', rotulo: 'Mais vendidos' },
++  { valor: 'relevancia', rotulo: 'Relevância' },
++  { valor: 'comissao', rotulo: 'Maior comissão' },
++  { valor: 'menor-preco', rotulo: 'Menor preço' },
++  { valor: 'desconto', rotulo: 'Maior desconto' },
++] as const;
++
++function desconto(p: Produto): string {
++  if (p.listPrice && p.price && p.listPrice > p.price) {
++    return `${Math.round((1 - p.price / p.listPrice) * 100)}%`;
++  }
++  return '—';
++}
++
++export function Garimpar() {
++  const [arvore, setArvore] = useState<Raiz[]>([]);
++  const [categoriaId, setCategoriaId] = useState<number | null>(null);
++  const [sort, setSort] = useState<(typeof ORDENS)[number]['valor']>('vendas');
++  const [resultado, setResultado] = useState<Resultado | null>(null);
++  const [carregando, setCarregando] = useState(false);
++  const [erro, setErro] = useState<string | null>(null);
++
++  useEffect(() => {
++    void api
++      .get<Raiz[]>('/api/categorias')
++      .then(setArvore)
++      .catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar as categorias.'));
++  }, []);
++
++  useEffect(() => {
++    if (categoriaId === null) return;
++    setCarregando(true);
++    setErro(null);
++    api
++      .get<Resultado>(`/api/garimpar/produtos?categoryId=${categoriaId}&sort=${sort}`)
++      .then((r) => setResultado(r))
++      .catch((e) => {
++        setResultado(null);
++        setErro(e instanceof Error ? e.message : 'A busca falhou.');
++      })
++      .finally(() => setCarregando(false));
++  }, [categoriaId, sort]);
++
++  return (
++    <>
++      <div className="head">
++        <div>
++          <h1>Garimpar</h1>
++          <p>Navegue os produtos de uma categoria da Shopee, direto da busca ao vivo, sem passar pela fila.</p>
++        </div>
++      </div>
++
++      {erro && <div className="notice">{erro}</div>}
++
++      <div className="split">
++        <div>
++          <div className="field" style={{ marginBottom: 10 }}>
++            <label htmlFor="sort">Ordenar por</label>
++            <select id="sort" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
++              {ORDENS.map((o) => (
++                <option key={o.valor} value={o.valor}>
++                  {o.rotulo}
++                </option>
++              ))}
++            </select>
++          </div>
++          <div className="catbox">
++            {arvore.map((r) => (
++              <div key={r.id} className="catbox__grupo">
++                <div className="catbox__raiz">
++                  {r.nome} <span>{int(r.itens)}</span>
++                </div>
++                {r.filhas.map((f) => (
++                  <div
++                    key={f.id}
++                    className="catbox__item"
++                    onClick={() => setCategoriaId(f.id)}
++                    style={
++                      categoriaId === f.id
++                        ? { background: 'rgba(22, 23, 26, 0.06)', fontWeight: 700 }
++                        : undefined
++                    }
++                  >
++                    <span>{f.nome}</span>
++                    <em>{int(f.itens)}</em>
++                  </div>
++                ))}
++              </div>
++            ))}
++          </div>
++        </div>
++
++        <div>
++          {categoriaId === null && (
++            <div className="empty">
++              <strong>Escolha uma categoria</strong>
++              Clique em uma categoria à esquerda pra ver os produtos.
++            </div>
++          )}
++
++          {categoriaId !== null && carregando && (
++            <div className="empty">
++              <strong>Buscando...</strong>
++            </div>
++          )}
++
++          {categoriaId !== null && !carregando && resultado && resultado.produtos.length === 0 && (
++            <div className="empty">
++              <strong>Nada encontrado</strong>
++              Nada encontrado nessa categoria com esse filtro.
++            </div>
++          )}
++
++          {categoriaId !== null && !carregando && resultado && resultado.produtos.length > 0 && (
++            <table className="table">
++              <thead>
++                <tr>
++                  <th>Produto</th>
++                  <th className="num">Preço</th>
++                  <th className="num">Desconto</th>
++                  <th className="num">Comissão</th>
++                  <th className="num">Vendas</th>
++                </tr>
++              </thead>
++              <tbody>
++                {resultado.produtos.map((p) => (
++                  <tr key={p.externalId}>
++                    <td>
++                      <div className="cell-product">
++                        {p.imageUrl && <img src={p.imageUrl} alt="" loading="lazy" />}
++                        <span>
++                          {p.title}
++                          <br />
++                          <small style={{ color: 'var(--muted)' }}>{resultado.categoria}</small>
++                        </span>
++                      </div>
++                    </td>
++                    <td className="num">{brl(p.price)}</td>
++                    <td className="num">{desconto(p)}</td>
++                    <td className="num">{p.commissionPct ? `${p.commissionPct.toFixed(0)}%` : '—'}</td>
++                    <td className="num">
++                      <strong>{int(p.soldCount)}</strong>
++                    </td>
++                  </tr>
++                ))}
++              </tbody>
++            </table>
++          )}
++        </div>
++      </div>
++    </>
++  );
++}

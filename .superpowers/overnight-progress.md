@@ -66,15 +66,106 @@ this session as off-limits without explicit review).
    wizard, no silent fallback to the default. This sidesteps the
    invariant entirely rather than hardening it. <<<
 
-5. Disparos: design locked with the user (see decisions below), about to
-   dispatch.
-   - Offers move OUT of Fila when added to a disparo; cancelling returns
-     them to PENDING.
-   - Multi-group = one send per (offer, group) pair, each respecting the
-     interval (no burst).
-   - "Não enviar oferta expirada": toggle rendered but INERT for now,
-     user chose to defer the expiry-detection mechanism.
-   - Minimum interval 5 minutes.
+5. Disparos: COMPLETE (commits 914a221 + fixes 0235e4f + 7cb55cc,
+   final re-review clean). Merged into docker-e-identidade, deployed to
+   the live Docker containers (web+api rebuilt, WhatsApp reconnected
+   with the preserved session, no errors in logs). Schema applied
+   (additive: 2 tables, 2 enums, +1 OfferStatus value, 3 indexes —
+   approved by user after seeing the plain SQL).
+   First-pass review found 2 Critical (double-send on process death;
+   routine cap/disconnect errors silently burned offers to an
+   unrecoverable FAILED state) + 8 Important + 5 Minor. All fixed in one
+   wave. Scoped re-review found the fix wave itself introduced 1 new
+   Important regression (cancelling a multi-group disparo could push an
+   already-SENT offer back to PENDING, letting Automações re-send it for
+   real) — fixed with a 3-line change + 2 cheap minors, verified build,
+   merged, redeployed. This feature sends real WhatsApp messages from a
+   ban-able number; treated every finding here as load-bearing.
+
+6. Meus Grupos: COMPLETE (commit 6465719, review clean — zero
+   Critical/Important, only cosmetic minors: inherited NaN-on-bad-`?days=`
+   pattern copied from stats.ts, one FK-less groupJid, self-report
+   overstated one string-reuse claim slightly). Schema APPLIED to the live
+   DB — user approved after seeing the plain SQL (pure ALTER ADD COLUMN +
+   CREATE TYPE + CREATE TABLE + CREATE INDEX, zero destructive ops).
+   Merged into docker-e-identidade (fast-forward), web+api rebuilt,
+   deployed. Logs confirm: WhatsApp reconnected with preserved session,
+   groups synced (count: 2), API healthy, web 200. No errors.
+   Reviewer independently verified (not from report alone): try/catch
+   fully wraps the Baileys event handler and never rethrows; the
+   createMany+updateMany(increment) pair runs inside one $transaction and
+   is genuinely atomic/race-free against concurrent syncGroups(); schema
+   is purely additive; groups.ts is N+1-free (4 parallel queries);
+   trackingSince correctly returns null (not 0/epoch) for a
+   never-tracked group.
+
+7. Configurações reestruturada: COMPLETE (commit eff2c08, review clean —
+   zero findings). Conexões e Templates viram abas dentro de uma página
+   Configurações só (`/configuracoes`), copiando o padrão `.tabs` já
+   usado em Disparos.tsx. `Conexoes.tsx`/`Templates.tsx` ficaram
+   intocados — só composição, sem mexer em lógica interna. Nav: item
+   "Modelos" saiu do grupo Automação, item de Configurações agora aponta
+   pra `/configuracoes`. Sem mudança de schema/API. Merge fast-forward,
+   web rebuildado e redeployado, health check 200 confirmado.
+
+## Sub-project 8 prep/dispatch (Garimpar) — grounded, dispatched
+- Correction of the original assumption: "reusing existing Category model
+  and search infrastructure" turns out to mean the LIVE Shopee search API
+  (`connectors[Platform.SHOPEE].search({categoryId, sort, limit})`, used
+  today by `services/nichos.ts`'s `buscarPorNicho`), NOT the local
+  `Product` table — verified live DB: `Product.category` is a
+  slash-joined 3-level catid path (e.g. "100535/100578/0"), and the
+  `Category` table only has 285 rows (2 levels from the daily feed's
+  catid1/catid2), populated for niche-building, not bulk browsing.
+  Browsing "by category" for real, current results means the live API
+  call, same as the Nichos "Testar" button already does for one category
+  at a time.
+- No schema change needed at all. Reuses existing `GET /api/categorias`
+  as-is. New: one read-only route `GET /api/garimpar/produtos`, one new
+  page `Garimpar.tsx` reusing `.catbox`/`.table`/`.cell-product` CSS
+  already in the app. Explicitly scoped read-only (no "send to fila"
+  action) to avoid scope creep.
+- Dispatched to implementer (sonnet, background).
+
+8. Garimpar: COMPLETE (commit 2a80e9b, review clean — zero Critical/
+   Important, 2 cosmetic minors: no request-race guard on rapid
+   sort/category switching on this read-only page, repeated category
+   label per row instead of once above table). No schema change (reused
+   `GET /api/categorias` as-is; new route hits the live Shopee search API,
+   same infra `services/nichos.ts`'s "Testar" already uses). Confirmed
+   zero diff to nichos.ts/services/nichos.ts/Nichos.tsx/schema.prisma.
+   Merged into docker-e-identidade (fast-forward), web+api rebuilt,
+   redeployed. Logs confirm WhatsApp reconnected clean, groups synced,
+   API healthy, web 200.
+
+ALL 8 SUB-PROJECTS COMPLETE AND DEPLOYED.
+
+## Final whole-branch review (opus) — COMPLETE
+
+Approved with follow-ups: 0 Critical, 3 Important, 8 Minor. Coherence
+checks all passed (route table, nav, dark-mode CSS survived every later
+sub-project, Baileys listener stack reads as one clean function, Templates
+↔ Disparos ↔ Configurações interaction intact, schema internally
+consistent, working tree clean).
+
+Fixed in one wave (commit 3d42ae7, re-reviewed clean, merged, redeployed):
+- Important: stats API missing `DISPATCHING` count; VisaoGeral's Disparos
+  panel stale ("ainda não existe" — Disparos had already shipped);
+  DELETE /api/templates/:id had no FK guard against Disparo (would 500).
+- Minor (5 of 8 addressed): Garimpar's selected-category highlight
+  invisible in dark mode; stale MessageTemplate schema comment;
+  RESUME-AMANHA.md moved into .superpowers/; missing catch-all route;
+  MeusGrupos empty-state text still said "Conexões".
+- Minor (2 of 8, deliberately deferred, documented not fixed): VisaoGeral
+  shows the pending count twice under different labels (cosmetic); a
+  never-synced group's memberCount briefly no-ops on a Baileys event
+  before self-healing at next boot (already a known, accepted edge case
+  from the Meus Grupos sub-project).
+
+Final deploy verified: web 200, API healthy, WhatsApp reconnected with
+preserved session, groups synced, no errors in logs.
+
+OVERNIGHT INITIATIVE COMPLETE.
 
 ## RULING: schema changes are written but NOT applied tonight
 
