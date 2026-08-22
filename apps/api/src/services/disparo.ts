@@ -105,12 +105,16 @@ export async function cancelarDisparo(id: string) {
     throw new Error('Esse disparo ja terminou -- nao da pra cancelar.');
   }
 
-  const pendentes = disparo.items.filter((i) => i.status === DisparoItemStatus.PENDING);
-  const dispatchingIds = [...new Set(pendentes.map((i) => i.offerId))];
-
   const sentOfferIds = new Set(
     disparo.items.filter((i) => i.status === DisparoItemStatus.SENT).map((i) => i.offerId),
   );
+
+  const pendentes = disparo.items.filter((i) => i.status === DisparoItemStatus.PENDING);
+  // Oferta que ja saiu pra algum grupo NAO volta pra fila: ela foi enviada de
+  // verdade, e reverter pra PENDING deixaria a automacao reenviar o mesmo
+  // produto pro mesmo grupo.
+  const dispatchingIds = [...new Set(pendentes.map((i) => i.offerId))].filter((oid) => !sentOfferIds.has(oid));
+
   const failedOfferIds = [...new Set(disparo.items.filter((i) => i.status === DisparoItemStatus.FAILED).map((i) => i.offerId))];
   const failedSemSent = failedOfferIds.filter((oid) => !sentOfferIds.has(oid));
 
@@ -296,7 +300,7 @@ export async function runDisparos() {
       // disparo.
       const ultimoEnvio = await prisma.disparoItem.findFirst({
         where: { disparoId: disparo.id, status: DisparoItemStatus.SENT },
-        orderBy: { sentAt: 'desc' },
+        orderBy: { sentAt: { sort: 'desc', nulls: 'last' } },
       });
       if (ultimoEnvio?.sentAt && Date.now() - ultimoEnvio.sentAt.getTime() < disparo.intervalMinutes * MINUTE_MS) {
         continue;

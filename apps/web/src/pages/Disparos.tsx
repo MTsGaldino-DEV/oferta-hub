@@ -501,6 +501,7 @@ function EmAndamento() {
 
   async function carregar() {
     setDisparos(await api.get<DisparoResumo[]>('/api/disparos'));
+    setErro(null);
   }
 
   useEffect(() => {
