@@ -7,6 +7,7 @@ import { VisaoGeral } from './pages/VisaoGeral.js';
 import { Fila } from './pages/Fila.js';
 import { Desempenho } from './pages/Desempenho.js';
 import { MeusGrupos } from './pages/MeusGrupos.js';
+import { Garimpar } from './pages/Garimpar.js';
 import { Nichos } from './pages/Nichos.js';
 import { Produtos } from './pages/Produtos.js';
 import { Agenda } from './pages/Agenda.js';
@@ -87,6 +88,7 @@ export default function App() {
         <Route path="/grupos" element={<MeusGrupos />} />
         <Route path="/produtos" element={<Produtos />} />
         <Route path="/nichos" element={<Nichos />} />
+        <Route path="/garimpar" element={<Garimpar />} />
         <Route path="/agenda" element={<Agenda />} />
         <Route path="/automacoes" element={<Automacoes />} />
         <Route path="/disparos" element={<Disparos />} />

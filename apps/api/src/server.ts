@@ -10,6 +10,7 @@ import { automacaoRoutes } from './routes/automacoes.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { disparoRoutes } from './routes/disparos.js';
 import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
+import { garimparRoutes } from './routes/garimpar.js';
 import { groupRoutes } from './routes/groups.js';
 import { nichoRoutes } from './routes/nichos.js';
 import { offerRoutes } from './routes/offers.js';
@@ -76,6 +77,7 @@ await app.register(async (instance) => {
   await instance.register(credentialRoutes);
   await instance.register(disparoRoutes);
   await instance.register(extensaoAdminRoutes);
+  await instance.register(garimparRoutes);
   await instance.register(groupRoutes);
   await instance.register(nichoRoutes);
   await instance.register(offerRoutes);

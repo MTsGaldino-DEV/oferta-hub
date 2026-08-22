@@ -11,6 +11,7 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
   {
     label: 'Catálogo',
     items: [
+      { to: '/garimpar', label: 'Garimpar' },
       { to: '/nichos', label: 'Nichos' },
       { to: '/produtos', label: 'Preços vigiados' },
     ],
