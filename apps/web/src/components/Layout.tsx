@@ -49,7 +49,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         <nav className="rail__nav">
           {GROUPS.map((g, gi) => (
-            <div className="rail__group" key={g.label ?? `g${gi}`}>
+            <div className="rail__group" key={gi}>
               {g.label && <div className="rail__group-label">{g.label}</div>}
               {g.items.map((l) => (
                 <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
@@ -70,7 +70,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </span>
               <button
                 className="btn btn--ghost btn--sm"
-                style={{ borderColor: 'rgba(255,255,255,.25)', color: '#fff' }}
+                style={{ borderColor: 'rgba(255,255,255,.25)', color: '#fff', flexShrink: 0 }}
                 onClick={async () => {
                   await api.post('/api/logout');
                   window.location.href = '/';
