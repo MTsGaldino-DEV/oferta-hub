@@ -3,14 +3,26 @@ import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Logo } from './Logo.js';
 
-const LINKS = [
-  { to: '/', label: 'Fila', end: true },
-  { to: '/desempenho', label: 'Desempenho' },
-  { to: '/nichos', label: 'Nichos' },
-  { to: '/produtos', label: 'Preços vigiados' },
-  { to: '/agenda', label: 'Agenda' },
-  { to: '/automacoes', label: 'Automações' },
-  { to: '/conexoes', label: 'Conexões' },
+type NavLinkDef = { to: string; label: string; end?: boolean };
+
+const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
+  { label: null, items: [{ to: '/', label: 'Fila', end: true }] },
+  {
+    label: 'Catálogo',
+    items: [
+      { to: '/nichos', label: 'Nichos' },
+      { to: '/produtos', label: 'Preços vigiados' },
+    ],
+  },
+  {
+    label: 'Automação',
+    items: [
+      { to: '/agenda', label: 'Agenda' },
+      { to: '/automacoes', label: 'Automações' },
+    ],
+  },
+  { label: 'Métricas', items: [{ to: '/desempenho', label: 'Desempenho' }] },
+  { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -36,11 +48,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="rail__nav">
-          {LINKS.map((l) => (
-            <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
-              {l.label}
-              {l.to === '/' && pending > 0 && <span className="rail__count">{pending}</span>}
-            </NavLink>
+          {GROUPS.map((g, gi) => (
+            <div className="rail__group" key={g.label ?? `g${gi}`}>
+              {g.label && <div className="rail__group-label">{g.label}</div>}
+              {g.items.map((l) => (
+                <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
+                  {l.label}
+                  {l.to === '/' && pending > 0 && <span className="rail__count">{pending}</span>}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 
