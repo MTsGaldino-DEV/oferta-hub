@@ -30,7 +30,7 @@
 - Consumes: existing `pending` state and `NavLink`/`useLocation` imports already in `Layout.tsx` — unchanged.
 - Produces: nothing consumed by later tasks — self-contained.
 
-- [ ] **Step 1: Add group CSS to `styles.css`**
+- [x] **Step 1: Add group CSS to `styles.css`**
 
 Find this block (around line 105-109):
 
@@ -61,7 +61,7 @@ Add immediately after it:
 }
 ```
 
-- [ ] **Step 2: Replace the flat `LINKS` array with grouped `GROUPS` in `Layout.tsx`**
+- [x] **Step 2: Replace the flat `LINKS` array with grouped `GROUPS` in `Layout.tsx`**
 
 Find:
 
@@ -103,7 +103,7 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
 ];
 ```
 
-- [ ] **Step 3: Update the nav render to map groups**
+- [x] **Step 3: Update the nav render to map groups**
 
 Find:
 
@@ -136,24 +136,16 @@ Replace with:
         </nav>
 ```
 
-- [ ] **Step 4: Typecheck**
+- [x] **Step 4: Typecheck**
 
 Run: `npm run build --workspace=apps/web`
 Expected: exits 0, no TypeScript errors.
 
-- [ ] **Step 5: Start the dev stack and log in once (first visual check only)**
+- [~] **Step 5: Start the dev stack and log in once (first visual check only)** — SKIPPED. Discovered mid-execution that `npm run dev` on `apps/api` connects to a real WhatsApp account via Baileys immediately at boot — an external side effect ruled unsafe to trigger casually. See progress ledger ruling. All visual-check steps in this plan (Task 1 Step 6, Task 2 Step 4, Task 3 Step 4) were skipped for the same reason; verification fell back to typecheck + diff review only.
 
-Run in background: `npm run dev`
-This starts both `apps/api` (port 3333) and `apps/web` (port 5173, proxying `/api` to 3333).
+- [~] **Step 6: Visual check** — SKIPPED, see Step 5.
 
-Using the chrome-devtools MCP tools: `new_page` (or `navigate_page`) to `http://localhost:5173`. If the login screen shows, ask the user for the dashboard password, `fill` it into the password field, and submit. This session persists (cookie) for the remaining visual checks in Tasks 2 and 3.
-
-- [ ] **Step 6: Visual check**
-
-Take a screenshot (`take_screenshot`, `fullPage: true`) of the Fila page (default route `/`).
-Expected: sidebar nav shows "Fila" alone at top (no group label), then a "Catálogo" label above Nichos/Preços vigiados, "Automação" above Agenda/Automações, "Métricas" above Desempenho, "Configurações" above Conexões — each group visually separated by the added top margin.
-
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/Layout.tsx apps/web/src/styles.css
@@ -174,7 +166,7 @@ git commit -m "feat(web): agrupa nav da sidebar em seções"
 - Consumes: existing `wa` and `online` state in `Layout.tsx` (`wa: { status: string; quota: { used: number; cap: number } } | null`, `online = wa?.status === 'connected'`) — unchanged.
 - Produces: nothing consumed by later tasks — self-contained.
 
-- [ ] **Step 1: Replace `.rail__foot` CSS with a card variant in `styles.css`**
+- [x] **Step 1: Replace `.rail__foot` CSS with a card variant in `styles.css`**
 
 Find:
 
@@ -241,7 +233,7 @@ Replace with:
 }
 ```
 
-- [ ] **Step 2: Rebuild the footer JSX in `Layout.tsx`**
+- [x] **Step 2: Rebuild the footer JSX in `Layout.tsx`**
 
 Find:
 
@@ -298,17 +290,14 @@ Replace with:
         </div>
 ```
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `npm run build --workspace=apps/web`
 Expected: exits 0, no TypeScript errors.
 
-- [ ] **Step 4: Visual check**
+- [~] **Step 4: Visual check** — SKIPPED, see Task 1 Step 5.
 
-Dev stack from Task 1 should still be running with the session already logged in. Reload the page (`navigate_page` type `reload`) and take a screenshot.
-Expected: sidebar footer is now a bordered/rounded card with a status dot (yellow/`--tag` colored when WhatsApp is connected, translucent white when not) to the left of "Conectado"/"Offline", the "Sair" button aligned to the right of that same row, and the daily quota line below when available.
-
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/Layout.tsx apps/web/src/styles.css
@@ -329,7 +318,7 @@ git commit -m "feat(web): rodape da sidebar vira card de status"
 - Consumes: none — pure CSS class addition on existing JSX.
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: Add `.panel--hero` variant to `styles.css`**
+- [x] **Step 1: Add `.panel--hero` variant to `styles.css`**
 
 Find:
 
@@ -361,7 +350,7 @@ Add immediately after it:
 }
 ```
 
-- [ ] **Step 2: Apply the hero class to the "Adicionar oferta" panel in `Fila.tsx`**
+- [x] **Step 2: Apply the hero class to the "Adicionar oferta" panel in `Fila.tsx`**
 
 Find:
 
@@ -377,19 +366,27 @@ Replace with:
         <h2 className="panel__title">Adicionar oferta</h2>
 ```
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `npm run build --workspace=apps/web`
 Expected: exits 0, no TypeScript errors.
 
-- [ ] **Step 4: Visual check**
+- [~] **Step 4: Visual check** — SKIPPED, see Task 1 Step 5.
 
-Dev stack still running, session still logged in. Reload the Fila page and take a screenshot.
-Expected: the "Adicionar oferta" panel has a visible yellow-tinted background and border (distinct from the plain white panels below it), larger padding, and a bolder/larger title — while the URL/note fields, "Capturar" button, and search row inside it are unchanged.
-
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/Fila.tsx apps/web/src/styles.css
 git commit -m "feat(web): card hero pro formulario de adicionar oferta na fila"
 ```
+
+---
+
+## Execution note (post-implementation)
+
+Final whole-branch review (after all 3 tasks) found 3 Important + 2 Minor
+issues — a mobile-breakpoint regression from the new `.rail__group` markup,
+insufficient contrast on `.rail__group-label`, and insufficient
+border/background contrast on `.panel--hero`. Fixed in one follow-up commit
+(`fix(web): ajustes pos-review — nav mobile, contraste do label e do hero`),
+scoped-re-reviewed clean. Full detail in the SDD ledger for this plan.
