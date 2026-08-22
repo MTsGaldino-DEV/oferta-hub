@@ -62,24 +62,29 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="rail__foot">
-          <div>
-            WhatsApp: <strong style={{ color: online ? 'var(--tag)' : '#fff' }}>{online ? 'conectado' : 'offline'}</strong>
-          </div>
-          {wa && (
-            <div>
-              Envios hoje: {wa.quota.used}/{wa.quota.cap}
+          <div className="rail__user">
+            <div className="rail__user__row">
+              <span className="rail__user__status">
+                <span className="rail__user__dot" data-online={online} />
+                {online ? 'Conectado' : 'Offline'}
+              </span>
+              <button
+                className="btn btn--ghost btn--sm"
+                style={{ borderColor: 'rgba(255,255,255,.25)', color: '#fff' }}
+                onClick={async () => {
+                  await api.post('/api/logout');
+                  window.location.href = '/';
+                }}
+              >
+                Sair
+              </button>
             </div>
-          )}
-          <button
-            className="btn btn--ghost btn--sm"
-            style={{ borderColor: 'rgba(255,255,255,.25)', color: '#fff', width: 'fit-content' }}
-            onClick={async () => {
-              await api.post('/api/logout');
-              window.location.href = '/';
-            }}
-          >
-            Sair
-          </button>
+            {wa && (
+              <div className="rail__user__quota">
+                Envios hoje: {wa.quota.used}/{wa.quota.cap}
+              </div>
+            )}
+          </div>
         </div>
       </aside>
 

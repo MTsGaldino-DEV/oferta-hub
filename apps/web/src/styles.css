@@ -158,12 +158,49 @@ a {
 
 .rail__foot {
   margin-top: auto;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
   padding: 0 8px;
+}
+
+.rail__user {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--r);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+.rail__user__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+}
+
+.rail__user__status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #fff;
+}
+
+.rail__user__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  flex: none;
+}
+
+.rail__user__dot[data-online='true'] {
+  background: var(--tag);
+}
+
+.rail__user__quota {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .main {
