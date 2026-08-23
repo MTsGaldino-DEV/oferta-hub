@@ -28,6 +28,7 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from './ui/sidebar.js';
 
 type NavItem = { to: string; label: string; end?: boolean; icon: LucideIcon };
@@ -70,6 +71,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ pending, online, quota, onLogout }: AppSidebarProps) {
   const location = useLocation();
+  const { setOpenMobile } = useSidebar();
 
   return (
     <Sidebar collapsible="icon">
@@ -82,7 +84,7 @@ export function AppSidebar({ pending, online, quota, onLogout }: AppSidebarProps
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent role="navigation" aria-label="Navegação principal">
         {GROUPS.map((g, gi) => (
           <SidebarGroup key={gi}>
             {g.label && <SidebarGroupLabel>{g.label}</SidebarGroupLabel>}
@@ -99,7 +101,7 @@ export function AppSidebar({ pending, online, quota, onLogout }: AppSidebarProps
                   return (
                     <SidebarMenuItem key={item.to}>
                       <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
-                        <NavLink to={item.to} end={item.end}>
+                        <NavLink to={item.to} end={item.end} onClick={() => setOpenMobile(false)}>
                           <item.icon />
                           <span>{item.label}</span>
                         </NavLink>

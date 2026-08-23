@@ -1,6 +1,22 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* Preflight zera list-style globalmente (ol,ul,menu{list-style:none}).
+   Paginas com <ol>/<ul> sem classe propria (Conexoes.tsx) dependiam do
+   list-style nativo do navegador -- restaura pra decimal/disc padrao.
+   Listas com classe propria (.tag__reasons, .card__razoes em styles.css)
+   ja setam list-style:none sem @layer, entao continuam sem numero. */
+@layer base {
+  ol {
+    list-style: decimal;
+    padding-inline-start: 1.5em;
+  }
+  ul {
+    list-style: disc;
+    padding-inline-start: 1.5em;
+  }
+}
+
 /* Tokens do shadcn Sidebar apontando pros tokens que ja existem em
    styles.css -- "inline" pra resolver em runtime (reage a troca de tema),
    nao virar cor fixa no build. Nenhum valor novo, so alias. */

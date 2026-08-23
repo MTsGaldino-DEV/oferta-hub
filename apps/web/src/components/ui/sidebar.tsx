@@ -41,7 +41,13 @@ export const SidebarProvider = React.forwardRef<HTMLDivElement, SidebarProviderP
   ({ defaultOpen = true, open: openProp, onOpenChange, className, style, children, ...props }, ref) => {
     const isMobile = useIsMobile();
     const [openMobile, setOpenMobile] = React.useState(false);
-    const [internalOpen, setInternalOpen] = React.useState(defaultOpen);
+    // Le o cookie salvo num toggle anterior (sem SSR nesse projeto, entao
+    // nao ha layout de servidor que faca isso por nos) -- sem cookie, cai
+    // no defaultOpen normal (primeira visita).
+    const [internalOpen, setInternalOpen] = React.useState<boolean>(() => {
+      const match = document.cookie.match(/(?:^|; )sidebar_state=(true|false)/);
+      return match ? match[1] === 'true' : defaultOpen;
+    });
     const open = openProp ?? internalOpen;
 
     const setOpen = React.useCallback(
