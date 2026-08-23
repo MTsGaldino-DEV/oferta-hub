@@ -278,7 +278,7 @@ SidebarGroupContent.displayName = 'SidebarGroupContent';
 
 export const SidebarMenu = React.forwardRef<HTMLUListElement, React.ComponentProps<'ul'>>(
   ({ className, ...props }, ref) => (
-    <ul ref={ref} data-slot="sidebar-menu" className={cn('flex w-full min-w-0 flex-col gap-1', className)} {...props} />
+    <ul ref={ref} data-slot="sidebar-menu" className={cn('flex w-full min-w-0 flex-col gap-1 list-none', className)} {...props} />
   ),
 );
 SidebarMenu.displayName = 'SidebarMenu';
