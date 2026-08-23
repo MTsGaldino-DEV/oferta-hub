@@ -1497,3 +1497,71 @@ button.chip {
 [data-theme='dark'] .card__semfoto {
   color: #74787f;
 }
+
+/* ---------------------------------------------------------------
+   Feedback de protocolo
+   Overlay central, um estado so, ~1.5s. E um efeito forte de
+   proposito: so 3 acoes disparam ele (disparo, tema, WhatsApp).
+   --------------------------------------------------------------- */
+
+.protocol {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.protocol__box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  padding: 26px 34px;
+  border-radius: var(--r);
+  border: 1px solid var(--protocol-accent, var(--line));
+  /* Vidro escuro fixo nos dois temas: o overlay e um estado de sistema,
+     nao uma superficie do documento. */
+  background: rgba(12, 12, 17, 0.74);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: #f2f2f0;
+  box-shadow: 0 12px 44px rgba(0, 0, 0, 0.5);
+  animation: protocol-in 160ms ease-out;
+}
+
+.protocol__icon {
+  color: var(--protocol-accent, var(--brand));
+  display: block;
+  animation: protocol-pop 420ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.protocol__title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.protocol__subtitle {
+  font-size: 14px;
+  color: #9a9da3;
+}
+
+@keyframes protocol-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes protocol-pop {
+  0% {
+    transform: scale(0.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
