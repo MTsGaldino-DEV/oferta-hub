@@ -26,7 +26,13 @@ sidebar.
 2. **Tailwind CSS v4** via `@tailwindcss/vite` — sem `postcss.config.js` nem
    `tailwind.config.js`; tema declarado em CSS via `@theme`. Setup fica
    global no projeto (sem prefixo/escopo), preparando pras próximas rodadas
-   de migração, mesmo essa rodada só tocando a sidebar.
+   de migração, mesmo essa rodada só tocando a sidebar. Pacotes novos:
+   `tailwindcss`, `@tailwindcss/vite`, `tw-animate-css` (utilities
+   `animate-in`/`fade-in-0`/`slide-in-from-left` etc. -- não vêm no core do
+   Tailwind v4; é o sucessor do `tailwindcss-animate` compatível com v4,
+   usado pelo Sheet e pelo Tooltip), `@radix-ui/react-dialog` (Sheet),
+   `@radix-ui/react-tooltip`, `@radix-ui/react-slot`,
+   `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`.
 3. **Paleta preservada.** Os tokens atuais (`--brand`, `--ink`, `--canvas`,
    `--surface`, `--line`, `--drop`, `--gain`, `--raise`, `--on-brand`,
    `--slate`, `--r`) continuam sendo a fonte da verdade. As variáveis que o
@@ -77,9 +83,7 @@ apps/web/src/lib/utils.ts               -- cn() (clsx + tailwind-merge)
 apps/web/src/components/ui/button.tsx
 apps/web/src/components/ui/sheet.tsx
 apps/web/src/components/ui/tooltip.tsx
-apps/web/src/components/ui/separator.tsx
-apps/web/src/components/ui/skeleton.tsx
-apps/web/src/components/ui/sidebar.tsx  -- primitiva shadcn completa (Provider, Sidebar, Content, Group, Menu, MenuItem, MenuButton, MenuBadge, Trigger, Rail, Inset)
+apps/web/src/components/ui/sidebar.tsx  -- primitiva shadcn trimada (Provider, Sidebar, Header, Content, Footer, Group, GroupLabel, GroupContent, Menu, MenuItem, MenuButton com tooltip, MenuBadge, Trigger, Inset). Sem MenuAction/MenuSub/MenuSkeleton/Input/GroupAction/Separator -- zero consumidor nesta rodada (GROUPS é lista estática, sem submenu, sem divisor visual no design atual). Adicionar quando/se uma página futura precisar.
 apps/web/src/components/app-sidebar.tsx -- conteúdo do Hub Ofertas: GROUPS, header, footer
 apps/web/src/tailwind.css               -- @import "tailwindcss"; @theme com os aliases da seção 3
 ```
@@ -91,8 +95,7 @@ apps/web/vite.config.ts    -- plugin @tailwindcss/vite + resolve.alias @/* -> sr
 apps/web/tsconfig.json     -- compilerOptions.paths @/* -> src/* (convenção shadcn; precisa nos dois lugares -- tsc resolve por paths, vite/esbuild por resolve.alias)
 apps/web/index.html        -- nada (Google Fonts já importado, sem mudança)
 apps/web/src/main.tsx      -- import de tailwind.css
-apps/web/src/App.tsx       -- envolve com <SidebarProvider>
-apps/web/src/components/Layout.tsx -- troca <aside className="rail"> por <AppSidebar /> + <SidebarInset>
+apps/web/src/components/Layout.tsx -- troca <aside className="rail"> por <SidebarProvider><AppSidebar /><SidebarInset>. SidebarProvider fica aqui, não em App.tsx -- Layout.tsx é o único consumidor de contexto de sidebar no app inteiro (diferente do ProtocolToastProvider, que App.tsx precisa expor pra Disparos.tsx e Conexoes.tsx via hook). Colocar em App.tsx seria escopo maior que o necessário sem ganho nenhum.
 ```
 
 **Não tocar:** `apps/web/src/pages/*.tsx` (19 arquivos), `apps/web/src/styles.css`
@@ -118,8 +121,10 @@ apps/web/src/components/Layout.tsx -- troca <aside className="rail"> por <AppSid
 
 - Badge de pendentes na Fila: `SidebarMenuBadge` no lugar de `.rail__count`,
   mesma lógica (`pending > 0`, mesmo polling em `Layout.tsx`).
-- Status online + cota + botão Sair: `SidebarFooter` com `SidebarMenu`,
-  mesmo `useEffect`/`api.get` que já existe em `Layout.tsx`.
+- Status online + cota + botão Sair: `SidebarFooter` com marcação Tailwind
+  simples (não `SidebarMenu` -- não é item de navegação clicável, é card
+  informativo, igual era `.rail__user` antes), mesmo `useEffect`/`api.get`
+  que já existe em `Layout.tsx`.
 - Rota ativa: `SidebarMenuButton isActive` calculado a partir do mesmo
   `NavLink`/`useLocation` já usado.
 - Toggle de colapso: `SidebarTrigger` no topo da área de conteúdo (dentro de
