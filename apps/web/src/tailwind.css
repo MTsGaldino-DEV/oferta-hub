@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* Tokens do shadcn Sidebar apontando pros tokens que ja existem em
+   styles.css -- "inline" pra resolver em runtime (reage a troca de tema),
+   nao virar cor fixa no build. Nenhum valor novo, so alias. */
+@theme inline {
+  --color-sidebar: var(--slate);
+  --color-sidebar-foreground: #ffffff;
+  --color-sidebar-accent: rgba(255, 255, 255, 0.12);
+  --color-sidebar-accent-foreground: #ffffff;
+  --color-sidebar-border: rgba(255, 255, 255, 0.1);
+  --color-sidebar-ring: var(--brand);
+
+  --radius: var(--r);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-sm);
+  --radius-lg: var(--r);
+}

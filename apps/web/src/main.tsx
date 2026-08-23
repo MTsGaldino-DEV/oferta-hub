@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.js';
 import './styles.css';
+import './tailwind.css';
 import { applyStoredTheme } from './theme.js';
 
 applyStoredTheme();
