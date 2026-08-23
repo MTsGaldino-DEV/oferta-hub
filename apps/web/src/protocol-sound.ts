@@ -41,7 +41,7 @@ function pegarCtx(): AudioContext | null {
   if (!Ctor) return null;
   if (!ctx) ctx = new Ctor();
   // O navegador suspende o contexto ate um gesto do usuario.
-  if (ctx.state === 'suspended') void ctx.resume();
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
 }
 
@@ -58,13 +58,13 @@ function envelope(g: GainNode, t0: number, pico: number, ataque: number, cauda: 
  * sozinho ja cumpre o papel.
  */
 export function playProtocolSound(key: ProtocolKey): void {
-  const c = pegarCtx();
-  if (!c) return;
-
-  const receita = RECEITAS[key];
-  if (!receita) return;
-
   try {
+    const c = pegarCtx();
+    if (!c) return;
+
+    const receita = RECEITAS[key];
+    if (!receita) return;
+
     const t0 = c.currentTime;
     const [de, para] = receita.thump;
 
