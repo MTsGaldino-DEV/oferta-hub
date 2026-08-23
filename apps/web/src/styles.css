@@ -11,31 +11,48 @@
   --brand: #ffe01b;
 
   --ink: #16171a;
-  --canvas: #e8e9eb;
-  --surface: #ffffff;
+  --canvas: #f4f4f2;
+  --surface: rgba(22, 23, 26, 0.04);
   --tag: var(--brand);
   --drop: #d93a1e;
   --gain: #0c7c4a;
   --muted: #74787f;
-  --line: #d8dadd;
+  --line: rgba(22, 23, 26, 0.1);
 
-  --display: 'Archivo', system-ui, sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  /* Superficie elevada opaca: botao primario e passo ativo. Nao pode usar
+     --ink, que no tema escuro vira texto claro. */
+  --raise: #16171a;
 
-  --r: 3px;
-  --shadow: 0 1px 0 rgba(22, 23, 26, 0.06), 0 2px 8px rgba(22, 23, 26, 0.06);
+  /* Texto que vai SOBRE --brand. --brand nao muda entre temas, entao esse
+     texto tambem nao pode mudar -- senao no escuro vira quase-branco sobre
+     amarelo. Mesma tecnica dos overrides pontuais que existiam antes. */
+  --on-brand: #16171a;
+
+  /* Fundo escuro fixo pra superficie que nao segue o flip de --ink:
+     sidebar e mark do login. */
+  --slate: #16171a;
+
+  --display: 'Space Grotesk', system-ui, sans-serif;
+  --mono: 'Space Grotesk', system-ui, sans-serif;
+
+  --r: 12px;
+  --r-sm: 8px;
+  --r-pill: 999px;
+  --shadow: 0 1px 0 rgba(22, 23, 26, 0.04), 0 2px 8px rgba(22, 23, 26, 0.05);
 }
 
 /* Modo escuro: mesmos nomes de token, valores invertidos. --brand/--tag,
-   --display, --mono e --r ficam de fora -- não mudam entre temas. */
+   --on-brand, --slate, --display, --mono e os raios ficam de fora -- não
+   mudam entre temas. */
 [data-theme='dark'] {
   --ink: #f2f2f0;
-  --canvas: #1c1d20;
-  --surface: #232427;
+  --canvas: #0c0c11;
+  --surface: rgba(255, 255, 255, 0.055);
   --drop: #ff6b52;
   --gain: #22a866;
   --muted: #9a9da3;
-  --line: #34353a;
+  --line: rgba(255, 255, 255, 0.1);
+  --raise: #2f3037;
 
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 2px 10px rgba(0, 0, 0, 0.5);
 }
@@ -58,6 +75,18 @@ body {
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Space Grotesk substituiu a mono: sem tabular-nums os precos mudam de
+   largura a cada digito e a coluna numerica da tabela treme. */
+.table .num,
+.kpi__value,
+.kpi__delta,
+.card__agora,
+.card__antes,
+.tag__now,
+.tag__was {
+  font-variant-numeric: tabular-nums;
 }
 
 button,
