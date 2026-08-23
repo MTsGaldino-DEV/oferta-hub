@@ -115,6 +115,11 @@ export function Conexoes() {
   // Guarda o status anterior pra disparar so na transicao, nao a cada
   // resposta do polling (que chega de 4 em 4 segundos).
   const statusAnterior = useRef<WaStatus['status'] | null>(null);
+  // Guarda o que foi ANUNCIADO, nao o status anterior: um blip
+  // connected -> connecting -> connected nao pode anunciar nada, e uma
+  // queda que passe por 'connecting' antes de morrer ainda precisa
+  // anunciar quando chegar em 'disconnected'.
+  const anunciadoConectado = useRef(false);
 
   const loadPlatforms = () => api.get<PlatformInfo[]>('/api/platforms').then(setPlatforms).catch(() => {});
   const loadWa = () => api.get<WaStatus>('/api/whatsapp/status').then(setWa).catch(() => {});
@@ -131,11 +136,20 @@ export function Conexoes() {
     if (!wa) return;
     const antes = statusAnterior.current;
     statusAnterior.current = wa.status;
-    // Primeira leitura da pagina nao e transicao: sem isso, abrir a tela
-    // com o WhatsApp ja conectado dispararia o feedback do nada.
-    if (antes === null || antes === wa.status) return;
+
+    // Primeira leitura da pagina nao e transicao: so registra o estado
+    // inicial, senao abrir a tela com o WhatsApp ja conectado dispararia
+    // o feedback do nada.
+    if (antes === null) {
+      anunciadoConectado.current = wa.status === 'connected';
+      return;
+    }
+    if (antes === wa.status) return;
 
     if (wa.status === 'connected') {
+      // Ja anunciado: isso e a volta de um blip, nao uma conexao nova.
+      if (anunciadoConectado.current) return;
+      anunciadoConectado.current = true;
       protocolo({
         title: 'WHATSAPP',
         subtitle: 'Conectado',
@@ -143,7 +157,10 @@ export function Conexoes() {
         icon: 'whatsapp',
         sound: 'whatsapp-on',
       });
-    } else if (antes === 'connected') {
+    } else if (anunciadoConectado.current && wa.status !== 'connecting') {
+      // 'connecting' e blip -- o Baileys reconecta sozinho em segundos.
+      // So 'disconnected' e 'qr' sao queda de verdade.
+      anunciadoConectado.current = false;
       protocolo({
         title: 'WHATSAPP',
         subtitle: 'Desconectado',

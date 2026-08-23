@@ -92,7 +92,6 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
           ) : null}
           <div className="card__linha">
             <span className="card__agora">{brl(offer.price)}</span>
-            {desconto > 0 && <span className="card__off">{desconto}% OFF</span>}
           </div>
         </div>
 

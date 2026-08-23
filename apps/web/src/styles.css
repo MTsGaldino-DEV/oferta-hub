@@ -1160,12 +1160,15 @@ button.chip {
 }
 
 /* Badge de desconto: canto superior esquerdo do poço, vermelho sobre
-   branco fixo -- por isso o texto e branco literal, nao um token. */
+   branco fixo -- por isso fundo E texto sao literais, nao tokens. O poço
+   e branco fixo nos dois temas, entao nenhum dos dois pode seguir a
+   virada do tema: var(--drop) no escuro vira um vermelho claro pensado
+   pra ler sobre fundo escuro, nao pra carregar texto branco em cima. */
 .card__off--badge {
   position: absolute;
   top: 8px;
   left: 8px;
-  background: var(--drop);
+  background: #d93a1e;
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -1274,12 +1277,6 @@ button.chip {
   font-weight: 600;
   letter-spacing: -0.035em;
   line-height: 1.15;
-}
-
-.card__off {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--drop);
 }
 
 .card__origem {

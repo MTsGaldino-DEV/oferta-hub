@@ -10,6 +10,7 @@
     "db:push": "npm run db:push --workspace=apps/api",
     "db:studio": "npm run db:studio --workspace=apps/api",
     "build": "npm run build --workspace=apps/api && npm run build --workspace=apps/web",
+    "check:web": "node apps/web/src/protocol-sound.check.ts",
     "keygen": "node -e \"console.log('MASTER_KEY=' + require('crypto').randomBytes(32).toString('hex'))\""
   },
   "engines": { "node": ">=20" }
