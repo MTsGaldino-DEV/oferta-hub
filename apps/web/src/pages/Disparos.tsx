@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, brl, STORE, type Offer } from '../api.js';
+import { useProtocolToast } from '../components/ProtocolToast.js';
 
 interface TemplateLite {
   id: string;
@@ -124,6 +125,7 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
 
   const [criando, setCriando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const protocolo = useProtocolToast();
 
   useEffect(() => {
     setLoadingOffers(true);
@@ -201,6 +203,13 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
         avoidNightHours,
         avoidWeekends,
         skipExpiredOffers,
+      });
+      protocolo({
+        title: 'DISPARO',
+        subtitle: 'Iniciado',
+        accent: 'var(--brand)',
+        icon: 'disparo',
+        sound: 'disparo',
       });
       onCriado();
     } catch (err) {
@@ -498,6 +507,7 @@ function EmAndamento() {
   const [expandido, setExpandido] = useState<string | null>(null);
   const [itens, setItens] = useState<DisparoItemDetalhe[]>([]);
   const [cancelando, setCancelando] = useState<string | null>(null);
+  const protocolo = useProtocolToast();
 
   async function carregar() {
     setDisparos(await api.get<DisparoResumo[]>('/api/disparos'));
@@ -550,6 +560,13 @@ function EmAndamento() {
     setCancelando(id);
     try {
       await api.post(`/api/disparos/${id}/cancelar`);
+      protocolo({
+        title: 'DISPARO',
+        subtitle: 'Cancelado',
+        accent: 'var(--drop)',
+        icon: 'disparo',
+        sound: 'disparo-off',
+      });
       await carregar();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Não consegui cancelar.');

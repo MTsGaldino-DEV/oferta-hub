@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { getTheme, setTheme } from '../theme.js';
+import { useProtocolToast } from '../components/ProtocolToast.js';
 
 interface PlatformInfo {
   platform: string;
@@ -110,6 +111,10 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
 export function Conexoes() {
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
   const [wa, setWa] = useState<WaStatus | null>(null);
+  const protocolo = useProtocolToast();
+  // Guarda o status anterior pra disparar so na transicao, nao a cada
+  // resposta do polling (que chega de 4 em 4 segundos).
+  const statusAnterior = useRef<WaStatus['status'] | null>(null);
 
   const loadPlatforms = () => api.get<PlatformInfo[]>('/api/platforms').then(setPlatforms).catch(() => {});
   const loadWa = () => api.get<WaStatus>('/api/whatsapp/status').then(setWa).catch(() => {});
@@ -121,6 +126,33 @@ export function Conexoes() {
     const timer = setInterval(() => void loadWa(), 4000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!wa) return;
+    const antes = statusAnterior.current;
+    statusAnterior.current = wa.status;
+    // Primeira leitura da pagina nao e transicao: sem isso, abrir a tela
+    // com o WhatsApp ja conectado dispararia o feedback do nada.
+    if (antes === null || antes === wa.status) return;
+
+    if (wa.status === 'connected') {
+      protocolo({
+        title: 'WHATSAPP',
+        subtitle: 'Conectado',
+        accent: 'var(--gain)',
+        icon: 'whatsapp',
+        sound: 'whatsapp-on',
+      });
+    } else if (antes === 'connected') {
+      protocolo({
+        title: 'WHATSAPP',
+        subtitle: 'Desconectado',
+        accent: 'var(--drop)',
+        icon: 'whatsapp',
+        sound: 'whatsapp-off',
+      });
+    }
+  }, [wa?.status]);
 
   return (
     <>
@@ -174,7 +206,7 @@ export function Conexoes() {
           </>
         ) : wa?.qr ? (
           <div style={{ display: 'flex', gap: 22, alignItems: 'center', flexWrap: 'wrap' }}>
-            <img src={wa.qr} alt="QR code para parear o WhatsApp" width={200} height={200} style={{ borderRadius: 3 }} />
+            <img src={wa.qr} alt="QR code para parear o WhatsApp" width={200} height={200} style={{ borderRadius: 'var(--r)' }} />
             <ol style={{ margin: 0, paddingLeft: 18, fontSize: 14, lineHeight: 1.8 }}>
               <li>Abra o WhatsApp no chip secundário</li>
               <li>Aparelhos conectados → Conectar aparelho</li>
@@ -224,6 +256,7 @@ export function Conexoes() {
 
 function AparenciaCard() {
   const [theme, setThemeState] = useState(getTheme());
+  const protocolo = useProtocolToast();
 
   return (
     <div className="panel">
@@ -235,6 +268,13 @@ function AparenciaCard() {
             const next = theme === 'dark' ? 'light' : 'dark';
             setTheme(next);
             setThemeState(next);
+            protocolo({
+              title: next === 'dark' ? 'MODO ESCURO' : 'MODO CLARO',
+              subtitle: 'Aplicado',
+              accent: 'var(--brand)',
+              icon: 'tema',
+              sound: 'tema',
+            });
           }}
         >
           {theme === 'dark' ? 'Modo claro' : 'Modo escuro'}
