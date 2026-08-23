@@ -465,6 +465,8 @@ No fim do arquivo, **apagar** o bloco:
 }
 ```
 
+Em `.progress` (linha ~1405), trocar `border-radius: 20px;` por `border-radius: var(--r-pill);`.
+
 - [ ] **Step 7: Card de produto — poço sem padding, hover sem elevação, badge de desconto**
 
 Substituir `.card:hover` (linhas ~1059-1062) por:
@@ -634,7 +636,7 @@ Em `.tag:hover` (linhas ~449-452), substituir por:
 
 Em `.tag__thumb` (linha ~498) e `.cell-product img` (linha ~662), trocar o `border-radius` por `var(--r-sm)` (a miniatura de 34px com 12px vira quase um círculo).
 
-Em `.login__mark` (linha ~772), trocar `background: var(--ink);` por `background: var(--slate);`. No fim do arquivo, **apagar**:
+Em `.login__mark` (linha ~772), trocar `background: var(--ink);` por `background: var(--slate);` e `border-radius: 10px;` por `border-radius: var(--r);`. No fim do arquivo, **apagar**:
 
 ```css
 [data-theme='dark'] .login__mark {
@@ -795,6 +797,13 @@ fresco.playProtocolSound('tema');
 
 console.log(`ok — ${PROTOCOL_KEYS.length} receitas montam grafo completo`);
 ```
+
+**Ruling pré-autorizado do controlador:** o último bloco depende do Node aceitar
+query string (`?limpo=`) num `import()` de arquivo `.ts` com type-stripping. Se
+isso falhar no Node desta máquina, **apague só esse bloco de três linhas** (o
+`delete`, o `import` e a chamada), mantenha o resto do check, e registre no
+relatório que a cobertura do caminho "sem AudioContext" foi removida. Não
+invente outra forma de testar esse caminho, e não instale nada pra isso.
 
 - [ ] **Step 2: Rodar o check e ver falhar**
 
