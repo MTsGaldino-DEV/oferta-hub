@@ -1,38 +1,8 @@
-import { NavLink, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../api.js';
-import { Logo } from './Logo.js';
-
-type NavLinkDef = { to: string; label: string; end?: boolean };
-
-const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
-  { label: null, items: [{ to: '/', label: 'Visão geral', end: true }] },
-  { label: null, items: [{ to: '/fila', label: 'Fila' }] },
-  {
-    label: 'Catálogo',
-    items: [
-      { to: '/garimpar', label: 'Garimpar' },
-      { to: '/nichos', label: 'Nichos' },
-      { to: '/produtos', label: 'Preços vigiados' },
-    ],
-  },
-  {
-    label: 'Automação',
-    items: [
-      { to: '/agenda', label: 'Agenda' },
-      { to: '/automacoes', label: 'Automações' },
-      { to: '/disparos', label: 'Disparos' },
-    ],
-  },
-  {
-    label: 'Métricas',
-    items: [
-      { to: '/desempenho', label: 'Desempenho' },
-      { to: '/grupos', label: 'Meus Grupos' },
-    ],
-  },
-  { label: 'Configurações', items: [{ to: '/configuracoes', label: 'Configurações' }] },
-];
+import { AppSidebar } from './app-sidebar.js';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from './ui/sidebar.js';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState(0);
@@ -44,60 +14,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
     api.get<any>('/api/whatsapp/status').then(setWa).catch(() => {});
   }, [location.pathname]);
 
-  const online = wa?.status === 'connected';
+  async function logout() {
+    await api.post('/api/logout');
+    window.location.href = '/';
+  }
 
   return (
-    <div className="shell">
-      <aside className="rail">
-        <div className="rail__mark">
-          <Logo size={34} className="rail__logo" />
-          <div className="rail__wordmark">
-            Hub<span>Ofertas</span>
-          </div>
-        </div>
-
-        <nav className="rail__nav">
-          {GROUPS.map((g, gi) => (
-            <div className="rail__group" key={gi}>
-              {g.label && <div className="rail__group-label">{g.label}</div>}
-              {g.items.map((l) => (
-                <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
-                  {l.label}
-                  {l.to === '/fila' && pending > 0 && <span className="rail__count">{pending}</span>}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
-
-        <div className="rail__foot">
-          <div className="rail__user">
-            <div className="rail__user__row">
-              <span className="rail__user__status">
-                <span className="rail__user__dot" data-online={online} />
-                {online ? 'Conectado' : 'Offline'}
-              </span>
-              <button
-                className="btn btn--ghost btn--sm"
-                style={{ borderColor: 'rgba(255,255,255,.25)', color: '#fff', flexShrink: 0 }}
-                onClick={async () => {
-                  await api.post('/api/logout');
-                  window.location.href = '/';
-                }}
-              >
-                Sair
-              </button>
-            </div>
-            {wa && (
-              <div className="rail__user__quota">
-                Envios hoje: {wa.quota.used}/{wa.quota.cap}
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
-
-      <main className="main">{children}</main>
-    </div>
+    <SidebarProvider style={{ '--sidebar-width': '13rem' } as React.CSSProperties}>
+      <AppSidebar
+        pending={pending}
+        online={wa?.status === 'connected'}
+        quota={wa?.quota ?? null}
+        onLogout={() => void logout()}
+      />
+      <SidebarInset className="main">
+        <SidebarTrigger className="mb-3" />
+        {children}
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
