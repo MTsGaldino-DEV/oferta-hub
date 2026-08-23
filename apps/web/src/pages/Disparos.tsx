@@ -275,7 +275,7 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
                         src={o.product.imageUrl}
                         alt=""
                         loading="lazy"
-                        style={{ width: 34, height: 34, objectFit: 'contain', background: 'var(--canvas)', borderRadius: 2, flexShrink: 0 }}
+                        style={{ width: 34, height: 34, objectFit: 'contain', background: 'var(--canvas)', borderRadius: 'var(--r-sm)', flexShrink: 0 }}
                       />
                     )}
                     <span style={{ flex: 1, fontSize: 13 }}>

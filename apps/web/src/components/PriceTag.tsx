@@ -55,6 +55,7 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
         ) : (
           <span className="card__semfoto">sem foto</span>
         )}
+        {desconto > 0 && <span className="card__off--badge">-{desconto}%</span>}
         <span
           className="card__nota"
           title="Nota de 0 a 100: histórico de preço, desconto, comissão e reputação"
