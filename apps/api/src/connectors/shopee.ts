@@ -51,8 +51,11 @@ function normalize(node: any): NormalizedProduct {
     commissionPct: node.commissionRate ? Number(node.commissionRate) * 100 : undefined,
     // A Shopee manda comissao como fracao (0.53 = 53%), mesma escala de
     // commissionRate -- por isso os dois multiplicam por 100 aqui.
-    sellerCommissionPct: node.sellerCommissionRate ? Number(node.sellerCommissionRate) * 100 : undefined,
-    commissionBrl: node.commission ? Number(node.commission) : undefined,
+    sellerCommissionPct:
+      node.sellerCommissionRate !== undefined && node.sellerCommissionRate !== null
+        ? Number(node.sellerCommissionRate) * 100
+        : undefined,
+    commissionBrl: node.commission !== undefined && node.commission !== null ? Number(node.commission) : undefined,
     shopType: node.shopType !== undefined && node.shopType !== null ? Number(node.shopType) : undefined,
     rating: node.ratingStar ? Number(node.ratingStar) : undefined,
     // A Shopee nao expoe numero de avaliacoes, so de vendas. Mantemos o valor
@@ -68,7 +71,7 @@ function normalize(node: any): NormalizedProduct {
 const PRODUCT_FIELDS = `
   itemId shopId productName imageUrl productLink offerLink price priceMin
   priceDiscountRate commissionRate ratingStar sales productCatIds
-  sellerCommissionRate shopeeCommissionRate commission shopType
+  sellerCommissionRate commission shopType
 `;
 
 /**
