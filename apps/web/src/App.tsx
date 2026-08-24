@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { api } from './api.js';
 import { Layout } from './components/Layout.js';
+import { Logo } from './components/Logo.js';
+import { ProtocolToastProvider } from './components/ProtocolToast.js';
+import { VisaoGeral } from './pages/VisaoGeral.js';
 import { Fila } from './pages/Fila.js';
 import { Desempenho } from './pages/Desempenho.js';
-import { Produtos } from './pages/Produtos.js';
-import { Agenda } from './pages/Agenda.js';
-import { Conexoes } from './pages/Conexoes.js';
+import { MeusGrupos } from './pages/MeusGrupos.js';
+import { Garimpar } from './pages/Garimpar.js';
+import { Automacoes } from './pages/Automacoes.js';
+import { Configuracoes } from './pages/Configuracoes.js';
 
 function Login({ onIn }: { onIn: () => void }) {
   const [password, setPassword] = useState('');
@@ -34,7 +38,12 @@ function Login({ onIn }: { onIn: () => void }) {
           void submit();
         }}
       >
-        <h1>Oferta Hub</h1>
+        <div className="login__brand">
+          <span className="login__mark">
+            <Logo size={30} />
+          </span>
+          <h1>Hub Ofertas</h1>
+        </div>
         <div className="field">
           <label htmlFor="pw">Senha do painel</label>
           <input
@@ -68,14 +77,19 @@ export default function App() {
   if (!auth) return <Login onIn={() => setAuth(true)} />;
 
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<Fila />} />
-        <Route path="/desempenho" element={<Desempenho />} />
-        <Route path="/produtos" element={<Produtos />} />
-        <Route path="/agenda" element={<Agenda />} />
-        <Route path="/conexoes" element={<Conexoes />} />
-      </Routes>
-    </Layout>
+    <ProtocolToastProvider>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<VisaoGeral />} />
+          <Route path="/fila" element={<Fila />} />
+          <Route path="/desempenho" element={<Desempenho />} />
+          <Route path="/grupos" element={<MeusGrupos />} />
+          <Route path="/garimpar" element={<Garimpar />} />
+          <Route path="/automacoes" element={<Automacoes />} />
+          <Route path="/configuracoes" element={<Configuracoes />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </ProtocolToastProvider>
   );
 }

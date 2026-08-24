@@ -1,3 +1,5 @@
+name: oferta-hub
+
 services:
   db:
     image: postgres:16-alpine
@@ -6,12 +8,59 @@ services:
       POSTGRES_USER: oferta
       POSTGRES_PASSWORD: oferta
       POSTGRES_DB: ofertahub
+      TZ: America/Sao_Paulo
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U oferta"]
+      test: ["CMD-SHELL", "pg_isready -U oferta -d ofertahub"]
       interval: 5s
       retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    # .env traz MASTER_KEY, DASHBOARD_PASSWORD, SESSION_SECRET e as credenciais
+    # das plataformas. O bloco environment abaixo tem precedencia e corrige o
+    # que so vale fora do container (host do banco, caminho da sessao).
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://oferta:oferta@db:5432/ofertahub
+      PORT: "3333"
+      # Base dos links curtos e origem esperada do cookie de sessao.
+      # Trocar pelo IP da maquina (http://192.168.x.x:8090) pra abrir de outro
+      # aparelho, ou pela URL do tunel quando for expor pra fora.
+      PUBLIC_URL: http://localhost:8090
+      # Sessao do WhatsApp fora da arvore do app, em volume proprio.
+      WA_STATE_DIR: /data/auth_state
+      # Sem isso os crons dos workers rodariam em UTC.
+      TZ: America/Sao_Paulo
+    volumes:
+      # Bind mount: reaproveita a sessao ja pareada e mantem backup no host.
+      - ./apps/api/auth_state:/data/auth_state
+    ports: ["3333:3333"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3333/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports: ["8090:80"]
 
 volumes:
   pgdata:

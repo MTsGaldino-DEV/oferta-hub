@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma, num } from '../db.js';
 import { detectPlatform } from '../connectors/index.js';
+import { NICHOS_SHOPEE } from '../connectors/nichos.js';
 import { upsertProduct } from '../services/ingest.js';
 
 export async function watchRoutes(app: FastifyInstance) {
@@ -77,27 +78,50 @@ export async function watchRoutes(app: FastifyInstance) {
 
   /** Regras do garimpo automatico. */
   app.get('/api/discovery', async () => {
-    const rules = await prisma.discoveryRule.findMany({ orderBy: { createdAt: 'desc' } });
+    const rules = await prisma.discoveryRule.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { niche: true },
+    });
     return rules.map((r) => ({
       ...r,
+      niche: undefined,
+      nicho: r.niche?.name ?? NICHOS_SHOPEE.find((n) => n.id === r.categoryId)?.label ?? null,
       maxPrice: num(r.maxPrice),
       minDiscount: num(r.minDiscount),
       minCommission: num(r.minCommission),
     }));
   });
 
+  /** Nichos que o seletor da tela oferece, por plataforma. */
+  app.get('/api/discovery/nichos', async () => NICHOS_SHOPEE);
+
   app.post<{
-    Body: { platform: Platform; keyword: string; maxPrice?: number; minDiscount?: number; minCommission?: number };
-  }>('/api/discovery', async (req) => {
+    Body: {
+      platform: Platform;
+      categoryId?: number;
+      keyword?: string;
+      maxPrice?: number;
+      minDiscount?: number;
+      minCommission?: number;
+    };
+  }>('/api/discovery', async (req, reply) => {
     const body = z
       .object({
         platform: z.nativeEnum(Platform),
-        keyword: z.string().min(2).max(80),
+        nicheId: z.string().optional(),
+        categoryId: z.number().int().positive().optional(),
+        keyword: z.string().min(2).max(80).optional(),
         maxPrice: z.number().positive().optional(),
         minDiscount: z.number().min(0).max(95).default(20),
         minCommission: z.number().min(0).max(50).default(0),
       })
       .parse(req.body);
+
+    // Uma regra sem nicho, sem categoria e sem palavra nao tem o que buscar.
+    if (!body.nicheId && !body.categoryId && !body.keyword) {
+      return reply.code(400).send({ error: 'Escolha um nicho ou digite uma palavra-chave.' });
+    }
+
     const rule = await prisma.discoveryRule.create({ data: body });
     return { ok: true, id: rule.id };
   });

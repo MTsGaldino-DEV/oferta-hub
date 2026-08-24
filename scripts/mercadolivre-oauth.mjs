@@ -22,8 +22,14 @@
  *      quiser trocar por outra URL https seguindo, ajuste também a
  *      constante REDIRECT_URI logo adiante)
  *
- *   2. Confirme que o fluxo "Authorization Code" está habilitado na
- *      seção "Fluxos OAuth" dessa mesma tela.
+ *   2. Na seção "Fluxos OAuth" dessa mesma tela, marque OS DOIS:
+ *          [x] Authorization Code   -> permite trocar o código por token
+ *          [x] Refresh Token        -> sem isso a resposta vem SEM
+ *                                      refresh_token e o sistema para de
+ *                                      funcionar depois de 6 horas
+ *      O toggle "PKCE necessário" tanto faz: este script sempre manda
+ *      code_challenge/code_verifier, então funciona ligado ou desligado.
+ *      Depois de marcar, aceite os Termos e salve — só vale depois de salvar.
  *
  *   3. Nas permissões, não precisa mexer em nada além do padrão:
  *      "Usuários" já vem liberado, o resto pode ficar em "Sem acesso".

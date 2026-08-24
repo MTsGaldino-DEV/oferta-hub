@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
   DisconnectReason,
+  prepareWAMessageMedia,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   type WASocket,
@@ -9,6 +11,47 @@ import QRCode from 'qrcode';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
+import { createMutex } from '../lib/mutex.js';
+
+/**
+ * Sobe a foto do produto pros servidores do WhatsApp e devolve os campos de
+ * "high quality thumbnail" que fazem o card de preview aparecer GRANDE (foto
+ * no topo, como o card de referencia) em vez do icone pequeno e quadrado.
+ *
+ * Existe porque o mecanismo automatico do Baileys (`generateHighQualityLinkPreview`)
+ * nao funciona com link de afiliado: o `handleRedirects` dele SO segue redirect
+ * pro MESMO hostname (ou www. do mesmo) -- e todo link de afiliado redireciona
+ * pra um dominio diferente (meli.la -> mercadolivre.com.br, s.shopee.com.br ->
+ * shopee.com.br). Confirmado direto no codigo do pacote instalado. A pagina do
+ * Shopee no fim da cadeia nem tem tag og:image (e um shell client-side) -- so
+ * ML tem, e mesmo assim o redirect nunca era seguido. Por isso o card saia em
+ * branco nas duas plataformas.
+ *
+ * A saida: montar o preview a mao, com a foto que a gente ja tem salva -- pelo
+ * MESMO caminho que o Baileys usa quando a geracao automatica funciona
+ * (`prepareWAMessageMedia` com `mediaTypeOverride: 'thumbnail-link'`, so que
+ * apontando pra URL da nossa foto em vez da que ele tentaria (e falharia) raspar.
+ * So passar o `jpegThumbnail` (miniatura embutida, base64) faz o WhatsApp cair
+ * no layout compacto -- foi o que aconteceu no grupo real: card pequeno, sem a
+ * foto grande. O card grande exige a imagem de verdade hospedada no servidor do
+ * WhatsApp (`thumbnailDirectPath`/`mediaKey`), que so existe depois desse upload.
+ */
+async function gerarPreviewImagem(sock: WASocket, url: string): Promise<Record<string, unknown>> {
+  try {
+    const { imageMessage } = await prepareWAMessageMedia(
+      { image: { url } },
+      { upload: sock.waUploadToServer, mediaTypeOverride: 'thumbnail-link' },
+    );
+    if (!imageMessage) return {};
+    return {
+      jpegThumbnail: imageMessage.jpegThumbnail,
+      highQualityThumbnail: imageMessage,
+    };
+  } catch (err) {
+    logger.warn({ url, err: String(err) }, 'nao consegui gerar preview grande do link, seguindo sem foto');
+    return {};
+  }
+}
 
 /**
  * =====================================================================
@@ -31,9 +74,26 @@ import { logger } from '../lib/logger.js';
 
 type Status = 'disconnected' | 'connecting' | 'qr' | 'connected';
 
+/**
+ * Falha rotineira que some sozinha: teto diario ainda nao resetou, ou o
+ * numero esta reconectando. Quem chama sendOffer (o worker de Disparos) usa
+ * `instanceof` pra distinguir isso de um erro de verdade -- string matching
+ * em mensagem de erro quebraria silenciosamente se o texto mudasse.
+ */
+export class WhatsAppRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WhatsAppRetryableError';
+  }
+}
+
 class WhatsAppService {
   private sock: WASocket | null = null;
   private lastSentAt = 0;
+  // Sem isso, um clique manual e o agendador/automacao podem cair no mesmo
+  // instante: os dois passam pela checagem de teto/intervalo antes de
+  // qualquer um incrementar o contador, e o limite anti-ban estoura.
+  private readonly lock = createMutex();
   status: Status = 'disconnected';
   qrDataUrl: string | null = null;
   me: string | null = null;
@@ -41,6 +101,7 @@ class WhatsAppService {
   async connect(): Promise<void> {
     if (this.status === 'connecting' || this.status === 'connected') return;
     this.status = 'connecting';
+    this.qrDataUrl = null;
 
     const { state, saveCreds } = await useMultiFileAuthState(env.wa.stateDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -50,7 +111,7 @@ class WhatsAppService {
       auth: state,
       // O dashboard mostra o QR; nao precisamos poluir o terminal.
       printQRInTerminal: false,
-      browser: ['Oferta Hub', 'Chrome', '1.0.0'],
+      browser: ['Hub Ofertas', 'Chrome', '1.0.0'],
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
@@ -81,20 +142,96 @@ class WhatsAppService {
         this.sock = null;
 
         if (loggedOut) {
-          logger.error('Sessao encerrada no aparelho. Apague a pasta de sessao e pareie de novo.');
+          // A credencial ja nao vale nada -- guardar ela so trava o app num
+          // laco de "desconectado" sem QR. Limpa e deixa pronto pra parear.
+          await this.limparSessao();
+          logger.error('Sessao encerrada no aparelho. Abra Conexoes e leia o QR pra parear de novo.');
         } else {
           logger.warn({ code }, 'conexao caiu, reconectando em 5s');
           setTimeout(() => void this.connect(), 5000);
         }
       }
     });
+
+    // Entrada/saida de membro em qualquer grupo. So `add`/`remove` sao
+    // movimento de membro de verdade -- `promote`/`demote` sao mudanca de
+    // admin, nao entram no log (ver doc do model GroupMemberEvent).
+    //
+    // Handler roda dentro do socket do Baileys: qualquer excecao aqui pode
+    // derrubar a conexao usada pra enviar oferta, por isso tudo dentro de
+    // try/catch e nada relancado.
+    this.sock.ev.on('group-participants.update', async (update) => {
+      try {
+        const { id: groupJid, participants, action } = update;
+        if (action !== 'add' && action !== 'remove') return;
+
+        const delta = action === 'add' ? participants.length : -participants.length;
+        await prisma.$transaction([
+          prisma.groupMemberEvent.createMany({
+            data: participants.map((participant) => ({
+              groupJid,
+              participant,
+              action: action === 'add' ? 'ADD' : 'REMOVE',
+            })),
+          }),
+          // increment/decrement atomico -- sem findUnique + soma na mao, pra
+          // nao perder update se um syncGroups() completo rodar junto.
+          prisma.whatsappGroup.updateMany({
+            where: { jid: groupJid },
+            data: { memberCount: { increment: delta } },
+          }),
+        ]);
+      } catch (err) {
+        logger.error({ err: String(err) }, 'falha ao registrar entrada/saida de grupo');
+      }
+    });
   }
 
+  /**
+   * Encerra a sessao e apaga as credenciais do disco.
+   *
+   * Apagar e o ponto: sem isso, uma sessao morta fica para sempre. O Baileys
+   * reusa a credencial salva, o servidor recusa, e o app volta a "desconectado"
+   * sem nunca gerar QR -- nao ha como parear de novo.
+   */
   async logout() {
     await this.sock?.logout().catch(() => undefined);
+    this.encerrarSocket();
+    await this.limparSessao();
+  }
+
+  private encerrarSocket() {
+    try {
+      this.sock?.end(undefined);
+    } catch {
+      // socket ja morto; nao ha o que encerrar
+    }
     this.sock = null;
     this.status = 'disconnected';
     this.qrDataUrl = null;
+    this.me = null;
+  }
+
+  /**
+   * Zera a pasta de sessao. O proximo connect() nasce pedindo QR.
+   *
+   * Apaga o CONTEUDO, nao a pasta: no Docker ela e um bind mount, e remover o
+   * ponto de montagem devolve EBUSY -- a limpeza falhava calada e a sessao
+   * morta continuava la.
+   */
+  private async limparSessao() {
+    await fs.mkdir(env.wa.stateDir, { recursive: true }).catch(() => undefined);
+    let apagados = 0;
+    try {
+      for (const nome of await fs.readdir(env.wa.stateDir)) {
+        await fs.rm(`${env.wa.stateDir}/${nome}`, { recursive: true, force: true });
+        apagados++;
+      }
+    } catch (err) {
+      logger.error({ dir: env.wa.stateDir, err: String(err) }, 'nao consegui apagar a sessao');
+      throw new Error(`Nao consegui apagar a sessao em ${env.wa.stateDir}: ${String(err)}`);
+    }
+    logger.info({ dir: env.wa.stateDir, apagados }, 'sessao do WhatsApp apagada');
   }
 
   /** Guarda os grupos onde o numero esta, pra voce escolher o destino no dashboard. */
@@ -102,10 +239,11 @@ class WhatsAppService {
     if (!this.sock) return;
     const groups = await this.sock.groupFetchAllParticipating();
     for (const [jid, meta] of Object.entries(groups)) {
+      const memberCount = meta.participants.length;
       await prisma.whatsappGroup.upsert({
         where: { jid },
-        create: { jid, name: meta.subject },
-        update: { name: meta.subject },
+        create: { jid, name: meta.subject, memberCount },
+        update: { name: meta.subject, memberCount },
       });
     }
     logger.info({ count: Object.keys(groups).length }, 'grupos sincronizados');
@@ -119,7 +257,7 @@ class WhatsAppService {
       update: {},
     });
     if (log.count >= env.wa.dailyCap) {
-      throw new Error(
+      throw new WhatsAppRetryableError(
         `Teto diario de ${env.wa.dailyCap} envios atingido. Isso e proposital: passar disso e o caminho mais rapido pro ban.`,
       );
     }
@@ -137,28 +275,68 @@ class WhatsAppService {
     }
   }
 
-  async sendOffer(jid: string, text: string, imageUrl?: string | null): Promise<string> {
-    if (!this.sock || this.status !== 'connected') {
-      throw new Error('WhatsApp desconectado. Pareie o numero em Conexoes.');
-    }
+  /**
+   * Manda so texto, com um card de preview montado a mao (foto, titulo) em
+   * vez de anexar a imagem como midia.
+   *
+   * Era `{ image: { url }, caption }`. O problema: imagem anexada baixa pra
+   * galeria de todo mundo do grupo por padrao (auto-download do WhatsApp), e
+   * um grupo ativo enche o armazenamento de quem participa ate a pessoa sair.
+   * Card de preview nao e midia -- fica preso na bolha do texto, ninguem
+   * baixa nada.
+   *
+   * `preview` e opcional so pra nao quebrar quem manda texto sem produto
+   * associado; toda oferta de verdade tem foto e vai com ela.
+   */
+  async sendOffer(
+    jid: string,
+    text: string,
+    preview?: { title: string; link: string; imageUrl?: string | null },
+  ): Promise<string> {
+    // Todo o envio (checagem de teto, intervalo, digitando, mandar, contar)
+    // roda como bloco unico: e o que impede duas chamadas concorrentes
+    // (clique manual + agendador + automacao) de passar juntas pela mesma
+    // checagem antes de qualquer uma contar o proprio envio.
+    return this.lock(async () => {
+      if (!this.sock || this.status !== 'connected') {
+        throw new WhatsAppRetryableError('WhatsApp desconectado. Pareie o numero em Conexoes.');
+      }
 
-    const day = await this.checkQuota();
-    await this.waitInterval();
+      const day = await this.checkQuota();
+      await this.waitInterval();
 
-    // "Digitando..." antes de enviar deixa o comportamento mais proximo do humano.
-    await this.sock.presenceSubscribe(jid).catch(() => undefined);
-    await this.sock.sendPresenceUpdate('composing', jid).catch(() => undefined);
-    await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1800));
-    await this.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
+      // "Digitando..." antes de enviar deixa o comportamento mais proximo do humano.
+      await this.sock.presenceSubscribe(jid).catch(() => undefined);
+      await this.sock.sendPresenceUpdate('composing', jid).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 1200 + Math.random() * 1800));
+      await this.sock.sendPresenceUpdate('paused', jid).catch(() => undefined);
 
-    const sent = imageUrl
-      ? await this.sock.sendMessage(jid, { image: { url: imageUrl }, caption: text })
-      : await this.sock.sendMessage(jid, { text, linkPreview: null } as any);
+      // Passar `linkPreview` explicito -- mesmo sem thumbnail -- e o que faz o
+      // Baileys pular a tentativa automatica dele, que sempre falha aqui (ver
+      // gerarPreviewImagem). undefined so quando preview nem foi passado.
+      //
+      // `title` fica um espaco (nao string vazia) de proposito: o titulo do
+      // produto ja e a primeira linha do texto da mensagem (ver renderMessage em
+      // services/message.ts) -- repetir no card so duplica. Testado com string
+      // vazia primeiro e o WhatsApp descarta o card inteiro (nem a foto aparece)
+      // quando title === ''; com um espaco em branco o card renderiza normal e
+      // o titulo fica invisivel, que e o efeito que queremos.
+      const linkPreview = preview
+        ? {
+            'canonical-url': preview.link,
+            'matched-text': preview.link,
+            title: ' ',
+            ...(preview.imageUrl ? await gerarPreviewImagem(this.sock, preview.imageUrl) : {}),
+          }
+        : undefined;
 
-    this.lastSentAt = Date.now();
-    await prisma.sendLog.update({ where: { day }, data: { count: { increment: 1 } } });
+      const sent = await this.sock.sendMessage(jid, { text, linkPreview });
 
-    return sent?.key?.id ?? '';
+      this.lastSentAt = Date.now();
+      await prisma.sendLog.update({ where: { day }, data: { count: { increment: 1 } } });
+
+      return sent?.key?.id ?? '';
+    });
   }
 
   async quotaToday() {

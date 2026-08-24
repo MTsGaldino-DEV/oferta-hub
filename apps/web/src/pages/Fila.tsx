@@ -14,9 +14,20 @@ interface Found {
   error?: string;
 }
 
+/** Quantas ofertas cada nicho tem parada na fila. */
+interface AbaNicho {
+  nicheId: string;
+  nome: string;
+  total: number;
+}
+
 export function Fila() {
   const [offers, setOffers] = useState<Offer[]>([]);
+  const [abas, setAbas] = useState<AbaNicho[]>([]);
+  const [aba, setAba] = useState('');
+  const [plataforma, setPlataforma] = useState('');
   const [loading, setLoading] = useState(true);
+  const [enviadasHoje, setEnviadasHoje] = useState<number | null>(null);
   const [url, setUrl] = useState('');
   const [note, setNote] = useState('');
   const [adding, setAdding] = useState(false);
@@ -26,20 +37,56 @@ export function Fila() {
   const [found, setFound] = useState<Found[] | null>(null);
   const [searching, setSearching] = useState(false);
 
+  const [limpando, setLimpando] = useState(false);
+  const [limpandoFila, setLimpandoFila] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+
   const [editing, setEditing] = useState<Offer | null>(null);
   const [draft, setDraft] = useState('');
 
-  async function load() {
+  async function load(filtro = aba) {
     setLoading(true);
     try {
-      setOffers(await api.get<Offer[]>('/api/offers?status=PENDING'));
+      const query = filtro ? `&nicheId=${encodeURIComponent(filtro)}` : '';
+      setOffers(await api.get<Offer[]>(`/api/offers?status=PENDING${query}`));
+      setAbas(await api.get<AbaNicho[]>('/api/offers/por-nicho?status=PENDING'));
+      void carregarEnviadasHoje();
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    void load();
+    void load(aba);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aba]);
+
+  /** Quantas ofertas de cada plataforma estao na fila carregada. */
+  const contagemPlataforma = offers.reduce<Record<string, number>>((acc, o) => {
+    const p = o.product.platform;
+    acc[p] = (acc[p] ?? 0) + 1;
+    return acc;
+  }, {});
+  const plataformas = Object.keys(contagemPlataforma);
+
+  // Se a plataforma escolhida sumiu da fila (oferta enviada/pulada, ou troca de aba de nicho),
+  // volta pra "Todos" em vez de deixar a grade vazia sem saida.
+  useEffect(() => {
+    if (plataforma && !contagemPlataforma[plataforma]) setPlataforma('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offers]);
+
+  async function carregarEnviadasHoje() {
+    try {
+      const r = await api.get<{ total: number }>('/api/offers/enviadas-hoje');
+      setEnviadasHoje(r.total);
+    } catch {
+      // contador e informativo -- uma falha aqui nao pode travar a fila
+    }
+  }
+
+  useEffect(() => {
+    void carregarEnviadasHoje();
   }, []);
 
   async function addUrl() {
@@ -77,14 +124,72 @@ export function Fila() {
     setOffers((prev) => [offer, ...prev]);
   }
 
+  /** Tira a oferta da lista e corrige o contador da aba sem recarregar tudo. */
+  function retirar(id: string) {
+    const saindo = offers.find((o) => o.id === id);
+    setTimeout(() => {
+      setOffers((prev) => prev.filter((o) => o.id !== id));
+      setAbas((prev) =>
+        prev
+          .map((a) => (a.nicheId === (saindo?.nicheId ?? 'sem-nicho') ? { ...a, total: a.total - 1 } : a))
+          .filter((a) => a.total > 0),
+      );
+    }, 220);
+  }
+
   async function send(id: string) {
     await api.post(`/api/offers/${id}/send`);
-    setTimeout(() => setOffers((prev) => prev.filter((o) => o.id !== id)), 220);
+    retirar(id);
+    setEnviadasHoje((n) => (n ?? 0) + 1);
   }
 
   async function skip(id: string) {
     await api.post(`/api/offers/${id}/skip`);
-    setTimeout(() => setOffers((prev) => prev.filter((o) => o.id !== id)), 220);
+    retirar(id);
+  }
+
+  /** Colapsa anuncios repetidos que ja estao na fila, ficando com o mais barato. */
+  async function limparDuplicados() {
+    setLimpando(true);
+    setAviso(null);
+    try {
+      const r = await api.post<{
+        antes: number;
+        depois: number;
+        cortadas: number;
+        exemplos: { ficou: string; preco: number; repetidos: number }[];
+      }>('/api/offers/limpar-duplicados');
+      setAviso(
+        r.cortadas === 0
+          ? 'Nenhum produto repetido na fila.'
+          : `${r.cortadas} anúncio(s) repetido(s) saíram da fila — ficou o mais barato de cada produto. Restaram ${r.depois}.` +
+            (r.exemplos.length ? ` Ex.: "${r.exemplos[0].ficou.slice(0, 40)}..." resumiu ${r.exemplos[0].repetidos + 1} anúncios.` : ''),
+      );
+      await load(aba);
+    } catch (err) {
+      setAviso(err instanceof Error ? err.message : 'Não consegui limpar.');
+    } finally {
+      setLimpando(false);
+    }
+  }
+
+  /** Manda pra SKIPPED tudo que esta pendente na aba aberta -- ou a fila toda, na aba "Todos". */
+  async function limparFila() {
+    const nomeAba = aba ? abas.find((a) => a.nicheId === aba)?.nome ?? 'este nicho' : 'toda a fila';
+    if (!offers.length) return;
+    if (!confirm(`Pular ${offers.length} oferta(s) de ${nomeAba}? Não volta pra fila sozinha.`)) return;
+
+    setLimpandoFila(true);
+    setAviso(null);
+    try {
+      const r = await api.post<{ removidas: number }>('/api/offers/limpar-fila', aba ? { nicheId: aba } : {});
+      setAviso(`${r.removidas} oferta(s) saíram da fila.`);
+      await load(aba);
+    } catch (err) {
+      setAviso(err instanceof Error ? err.message : 'Não consegui limpar a fila.');
+    } finally {
+      setLimpandoFila(false);
+    }
   }
 
   async function saveDraft() {
@@ -102,16 +207,35 @@ export function Fila() {
           <p>
             Ordenada pela nota: histórico de preço pesa mais que o desconto anunciado. Nada sai daqui sem você
             clicar.
+            {enviadasHoje !== null && (
+              <>
+                {' '}
+                <strong>{enviadasHoje}</strong> enviada{enviadasHoje === 1 ? '' : 's'} hoje.
+              </>
+            )}
           </p>
         </div>
-        <button className="btn btn--ghost" onClick={() => void load()}>
-          Atualizar
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn--ghost" disabled={limpando} onClick={() => void limparDuplicados()}>
+            {limpando ? 'Limpando...' : 'Limpar repetidos'}
+          </button>
+          <button
+            className="btn btn--ghost"
+            disabled={limpandoFila || offers.length === 0}
+            onClick={() => void limparFila()}
+          >
+            {limpandoFila ? 'Limpando...' : 'Limpar fila'}
+          </button>
+          <button className="btn btn--ghost" onClick={() => void load(aba)}>
+            Atualizar
+          </button>
+        </div>
       </div>
 
       {error && <div className="notice">{error}</div>}
+      {aviso && <div className="notice" data-tone="warn">{aviso}</div>}
 
-      <div className="panel">
+      <div className="panel panel--hero">
         <h2 className="panel__title">Adicionar oferta</h2>
         <div className="row">
           <div className="field" style={{ flex: '2 1 340px' }}>
@@ -206,6 +330,42 @@ export function Fila() {
 
       <div style={{ height: 20 }} />
 
+      {abas.length > 1 && (
+        <div className="tabs">
+          <button className="tabs__item" data-on={aba === ''} onClick={() => setAba('')}>
+            Todos <span>{abas.reduce((n, a) => n + a.total, 0)}</span>
+          </button>
+          {abas.map((a) => (
+            <button
+              key={a.nicheId}
+              className="tabs__item"
+              data-on={aba === a.nicheId}
+              onClick={() => setAba(a.nicheId)}
+            >
+              {a.nome} <span>{a.total}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {plataformas.length > 1 && (
+        <div className="tabs">
+          <button className="tabs__item" data-on={plataforma === ''} onClick={() => setPlataforma('')}>
+            Todos <span>{offers.length}</span>
+          </button>
+          {plataformas.map((p) => (
+            <button
+              key={p}
+              className="tabs__item"
+              data-on={plataforma === p}
+              onClick={() => setPlataforma(p)}
+            >
+              {STORE[p] ?? p} <span>{contagemPlataforma[p]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading ? null : offers.length === 0 ? (
         <div className="empty">
           <strong>Fila vazia</strong>
@@ -213,19 +373,23 @@ export function Fila() {
           horas.
         </div>
       ) : (
-        <div className="queue">
-          {offers.map((o) => (
-            <PriceTag
-              key={o.id}
-              offer={o}
-              onSend={send}
-              onSkip={skip}
-              onEdit={(offer) => {
-                setEditing(offer);
-                setDraft(offer.message);
-              }}
-            />
-          ))}
+        <div className="shelf">
+          {offers
+            .map((o, i) => ({ offer: o, posicao: i + 1 }))
+            .filter(({ offer }) => !plataforma || offer.product.platform === plataforma)
+            .map(({ offer, posicao }) => (
+              <PriceTag
+                key={offer.id}
+                offer={offer}
+                posicao={posicao}
+                onSend={send}
+                onSkip={skip}
+                onEdit={(o) => {
+                  setEditing(o);
+                  setDraft(o.message);
+                }}
+              />
+            ))}
         </div>
       )}
 

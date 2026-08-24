@@ -18,7 +18,8 @@ enum Platform {
 
 enum OfferStatus {
   PENDING // esperando sua analise na fila
-  QUEUED // aprovada, aguardando horario
+  QUEUED // aprovada, aguardando horario (Agenda)
+  DISPATCHING // reservada por um Disparo -- fora da fila ate ele terminar ou ser cancelado
   SENT
   SKIPPED
   FAILED
@@ -58,6 +59,9 @@ model Product {
   commissionPct Decimal? @db.Decimal(6, 3)
   rating        Decimal? @db.Decimal(3, 2)
   reviewCount   Int?
+  /// Unidades vendidas na loja. Separa o que vende do que so esta no catalogo.
+  soldCount     Int?
+  shopName      String?
   available     Boolean  @default(true)
   lastSyncAt    DateTime?
   createdAt     DateTime @default(now())
@@ -102,6 +106,10 @@ model Offer {
   message      String
   couponCode   String?
 
+  /// De qual nicho essa oferta veio. Nulo = colada na mao ou vinda de regra
+  /// antiga por palavra-chave. E o que deixa a fila separada por prateleira.
+  nicheId      String?
+
   scheduledFor DateTime?
   sentAt       DateTime?
   failReason   String?
@@ -111,10 +119,13 @@ model Offer {
   updatedAt DateTime @updatedAt
 
   product     Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  niche       Niche?       @relation(fields: [nicheId], references: [id], onDelete: SetNull)
   shortLink   ShortLink?
   conversions Conversion[]
+  disparoItems DisparoItem[]
 
   @@index([status, score])
+  @@index([nicheId, status])
   @@index([createdAt])
 }
 
@@ -179,7 +190,16 @@ model WatchItem {
 model DiscoveryRule {
   id            String   @id @default(cuid())
   platform      Platform
-  keyword       String
+  /// Recorte curado de varias categorias. Quando presente, manda nele:
+  /// categoryId/keyword viram o modo antigo, de uma categoria so.
+  nicheId       String?
+  niche         Niche?   @relation(fields: [nicheId], references: [id], onDelete: SetNull)
+  /// Nicho (categoria da loja). E o filtro principal: palavra-chave traz
+  /// qualquer coisa que contenha o termo, categoria traz o que o publico
+  /// daquele nicho realmente compra.
+  categoryId    Int?
+  /// Refinamento opcional dentro do nicho. Nulo = o nicho inteiro.
+  keyword       String?
   maxPrice      Decimal? @db.Decimal(12, 2)
   minDiscount   Decimal  @default(20) @db.Decimal(5, 2)
   minCommission Decimal  @default(0) @db.Decimal(6, 3)
@@ -188,12 +208,236 @@ model DiscoveryRule {
   createdAt     DateTime @default(now())
 }
 
+/// Categoria da loja, colhida do datafeed de afiliados.
+/// A Shopee nao publica listagem de categorias na API; os nomes e IDs saem das
+/// colunas global_catid1/2 do feed diario. Ver connectors/shopee-feed.ts
+model Category {
+  platform   Platform
+  externalId Int
+  /// Nulo = categoria raiz. Preenchido = filha dessa raiz.
+  parentId   Int?
+  nameEn     String
+  nameBr     String
+  /// Quantos itens do feed cairam aqui. Termometro do tamanho da prateleira.
+  itemCount  Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@id([platform, externalId])
+  @@index([platform, parentId])
+}
+
+/// Nicho = recorte curado de varias categorias, com filtro de termos.
+///
+/// Existe porque categoria sozinha nao entrega nicho. Medido na Shopee: a
+/// prateleira "Fones" e 99% TWS generico, "Microfones" e lapela, "Moveis"
+/// esconde a cadeira gamer no meio de mesa de cabeceira. Um nicho de verdade e
+/// um conjunto de categorias + o que aceitar dentro de cada uma.
+model Niche {
+  id           String   @id @default(cuid())
+  platform     Platform
+  name         String
+  /// Corta o que nao vende. E o filtro que mais limpa a lista.
+  minSales     Int      @default(0)
+  /// Barra o titulo que bater qualquer um destes, em qualquer categoria.
+  excludeTerms String[] @default([])
+  /// Nicho que vem pronto no sistema. Nao e apagavel, so editavel.
+  builtIn      Boolean  @default(false)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  entries     NicheCategory[]
+  rules       DiscoveryRule[]
+  offers      Offer[]
+  automations AutomationRule[]
+
+  @@unique([platform, name])
+}
+
+/// Regra de envio automatico: escolhe as melhores ofertas pendentes sozinha e
+/// manda pro grupo, sem passar pela sua curadoria. E o oposto do resto do
+/// app -- por isso fica desligada por padrao (active=false ao criar) e o
+/// disparo continua passando pelas mesmas grades de seguranca do envio manual
+/// (teto diario e intervalo minimo em whatsapp/baileys.ts).
+model AutomationRule {
+  id     String  @id @default(cuid())
+  name   String
+  active Boolean @default(false)
+
+  /// 0=domingo .. 6=sabado. So dispara nesses dias.
+  weekdays Int[]
+  /// Janela do dia em que pode disparar, "HH:mm" no fuso do container
+  /// (America/Sao_Paulo).
+  windowStart String @default("09:00")
+  windowEnd   String @default("21:00")
+  /// Espaco minimo entre uma rodada e a proxima.
+  intervalMinutes Int @default(180)
+
+  /// Nulo = qualquer nicho, melhor nota primeiro.
+  nicheId String?
+  /// Quantas ofertas manda por rodada.
+  batchSize Int @default(1)
+  /// Nao manda o mesmo produto de novo antes de X horas, mesmo que a regra
+  /// rode de novo antes disso.
+  cooldownHours Int @default(72)
+
+  /// Grupos de destino. Mais de um = rodizio: uma rodada por grupo, na ordem.
+  groupJids String[]
+  /// Quantas rodadas essa regra ja fez -- e o que decide de qual grupo e a
+  /// vez, em groupJids[runsCount % groupJids.length].
+  runsCount Int @default(0)
+
+  lastRunAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  niche Niche? @relation(fields: [nicheId], references: [id], onDelete: SetNull)
+
+  @@index([active])
+}
+
+/// Uma categoria dentro de um nicho.
+model NicheCategory {
+  id         String @id @default(cuid())
+  nicheId    String
+  categoryId Int
+  /// Vazio = a categoria inteira entra (ja e pura o bastante: Consoles,
+  /// Teclados e mouses). Preenchido = so entra titulo que bater um dos termos,
+  /// que e como se pesca "headset gamer" de dentro de "Fones".
+  requireTerms String[] @default([])
+
+  niche Niche @relation(fields: [nicheId], references: [id], onDelete: Cascade)
+
+  @@unique([nicheId, categoryId])
+}
+
+/// Chave/valor para configuracao do app. Hoje guarda o token da extensao;
+/// serve tambem para as preferencias de mensagem.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 model WhatsappGroup {
   id        String   @id @default(cuid())
   jid       String   @unique
   name      String
   isDefault Boolean  @default(false)
+  /// Contagem atual de membros. Preenchida no syncGroups() completo (a cada
+  /// boot) e ajustada incrementalmente pelo evento group-participants.update
+  /// entre um sync e outro -- ver whatsapp/baileys.ts.
+  memberCount Int?
   updatedAt DateTime @updatedAt
+}
+
+enum GroupMemberAction {
+  ADD
+  REMOVE
+}
+
+/// Log de entrada/saida de membro, evento a evento. Existe porque uma
+/// contagem antes/depois esconde movimento: se 3 entram e 3 saem no mesmo
+/// dia, o total nao muda, mas "quantos entraram" so da pra responder com o
+/// evento de verdade, nao com a foto do antes/depois. So comeca a acumular a
+/// partir do deploy dessa feature -- entrada/saida anteriores a isso sao
+/// desconhecidas, nao zero (ver GET /api/groups e o campo trackingSince).
+model GroupMemberEvent {
+  id          String            @id @default(cuid())
+  groupJid    String
+  participant String
+  action      GroupMemberAction
+  occurredAt  DateTime          @default(now())
+
+  @@index([groupJid, occurredAt])
+}
+
+/// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}
+/// {PRECO_ANTIGO} {LINK} {CUPOM}) trocados pelos dados da oferta na hora do
+/// envio. `ctas` e um pool de chamadas finais -- uma sorteada por envio, pra
+/// nao repetir sempre a mesma linha. Usado pelo Disparo (campo templateId)
+/// pra montar a mensagem de cada envio.
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  body      String
+  ctas      String[] @default([])
+  showImage Boolean  @default(true)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  disparos Disparo[]
+}
+
+enum DisparoStatus {
+  DRAFT // criado, aguardando a hora de comecar (imediato ja nasce SENDING)
+  SENDING // o worker ja tocou em algum item -- em andamento
+  DONE // todos os itens resolvidos (enviado ou falhou)
+  CANCELLED
+}
+
+enum DisparoItemStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+/// Disparo manual em massa: um lote de ofertas x grupos, espacado no tempo.
+/// Ao criar, as ofertas escolhidas saem da fila (Offer.status vira
+/// DISPATCHING) pra nao serem pegas de novo pela curadoria manual nem por
+/// automacoes enquanto o disparo esta rodando. Ver services/disparo.ts.
+model Disparo {
+  id     String        @id @default(cuid())
+  status DisparoStatus @default(DRAFT)
+
+  templateId String
+  template   MessageTemplate @relation(fields: [templateId], references: [id])
+
+  /// Grupos de destino -- toda oferta do disparo vai pra cada um deles, um
+  /// DisparoItem por par (oferta, grupo).
+  groupJids String[]
+
+  /// Quando o primeiro envio deve sair. "Agora" grava o instante da criacao.
+  startAt DateTime
+  /// Espaco entre um envio e o proximo, em minutos. Piso de 5 (Zod na rota).
+  intervalMinutes Int
+
+  /// Guardas de seguranca: envio que caia dentro da janela e adiado, nunca
+  /// pulado ou mandado do mesmo jeito. Fuso America/Sao_Paulo.
+  avoidNightHours Boolean @default(true) // nao manda 23h-06h
+  avoidWeekends   Boolean @default(false) // nao manda sabado/domingo
+  /// Guardado mas sem efeito por enquanto: o dono ainda nao decidiu como
+  /// detectar oferta expirada. O worker le esse campo e ignora -- existe so
+  /// pra nao perder a escolha do usuario quando a checagem for implementada.
+  skipExpiredOffers Boolean @default(false)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  cancelledAt DateTime?
+
+  items DisparoItem[]
+
+  @@index([status])
+}
+
+/// Um envio dentro de um disparo: um par (oferta, grupo). E o que da pra
+/// contar progresso ("8 ofertas x 2 grupos = 16 envios, 3 feitos") e pro
+/// worker achar o proximo que vence.
+model DisparoItem {
+  id        String            @id @default(cuid())
+  disparoId String
+  disparo   Disparo           @relation(fields: [disparoId], references: [id], onDelete: Cascade)
+  offerId   String
+  offer     Offer             @relation(fields: [offerId], references: [id])
+  groupJid  String
+  status    DisparoItemStatus @default(PENDING)
+
+  scheduledFor DateTime
+  sentAt       DateTime?
+  failReason   String?
+
+  @@index([status, scheduledFor])
+  @@index([disparoId])
 }
 
 /// Contador diario de envios, pra respeitar o teto e nao queimar o numero.

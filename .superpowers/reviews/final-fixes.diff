@@ -1,0 +1,475 @@
+3d42ae7 fix(web): ajustes do review final — disparos na visao geral, guarda de exclusao de modelo, contraste do garimpar
+ RESUME-AMANHA.md => .superpowers/RESUME-AMANHA.md |  0
+ .superpowers/final-review-fixes-report.md         | 28 +++++++++++++++++++++++
+ apps/api/prisma/schema.prisma                     |  4 ++--
+ apps/api/src/routes/stats.ts                      |  4 +++-
+ apps/api/src/routes/templates.ts                  |  6 +++++
+ apps/web/src/App.tsx                              |  3 ++-
+ apps/web/src/pages/Garimpar.tsx                   |  6 +----
+ apps/web/src/pages/MeusGrupos.tsx                 |  2 +-
+ apps/web/src/pages/VisaoGeral.tsx                 | 16 +++++++++----
+ apps/web/src/styles.css                           |  8 ++++++-
+ 10 files changed, 62 insertions(+), 15 deletions(-)
+diff --git a/RESUME-AMANHA.md b/.superpowers/RESUME-AMANHA.md
+similarity index 100%
+rename from RESUME-AMANHA.md
+rename to .superpowers/RESUME-AMANHA.md
+diff --git a/.superpowers/final-review-fixes-report.md b/.superpowers/final-review-fixes-report.md
+new file mode 100644
+index 0000000..ca65e8f
+--- /dev/null
++++ b/.superpowers/final-review-fixes-report.md
+@@ -0,0 +1,28 @@
++# Final review fixes — relatorio
++
++Onda unica corrigindo os 3 Important + 5 Minor do review final do branch.
++
++1. **[Important] stats API sem DISPATCHING** — `apps/api/src/routes/stats.ts`: adicionado `prisma.offer.count({ where: { status: OfferStatus.DISPATCHING } })` em paralelo com `pending`/`queued`, retornado como `dispatching` no payload de `/api/stats/overview`. Feito.
++
++2. **[Important] painel Disparos desatualizado em VisaoGeral.tsx** — interface `Overview` ganhou `dispatching: number`; painel "Disparos" trocado: mostra `N oferta(s) em disparo agora` + link "Ver disparos em andamento →" quando `dispatching > 0`, senao "Nenhum disparo em andamento" + link "Começar um disparo →". Ambos linkam pra `/disparos` usando o `Link` ja importado. Feito.
++
++3. **[Important] DELETE /api/templates/:id sem guarda de FK** — `apps/api/src/routes/templates.ts`: adicionado `prisma.disparo.count({ where: { templateId } })` antes do delete; retorna 409 com mensagem clara se o modelo estiver em uso por algum Disparo. Logica de promocao do `isDefault` mantida intacta. Feito.
++
++4. **[Minor] contraste do item selecionado em Garimpar no dark mode** — trocado `style` inline por `data-picked={categoriaId === f.id}`; CSS novo `.catbox__item[data-picked='true']` usa `var(--brand)` (amarelo, estavel nos dois temas); `[data-theme='dark'] .catbox__item[data-picked='true']` adicionado ao grupo existente de selectors que fixam `color: #16171a` sobre fundo amarelo (mesmo grupo de `.rail__count`, `.btn--tag`, etc). Feito.
++
++5. **[Minor] doc-comment desatualizado de MessageTemplate** — `apps/api/prisma/schema.prisma`: removida a frase "Ainda nao e usado por nada: existe pra alimentar a futura tela de Disparos", substituida por referencia ao uso real via `Disparo.templateId`. Feito.
++
++6. **[Minor] RESUME-AMANHA.md fora de lugar** — movido pra `.superpowers/RESUME-AMANHA.md` via `git mv`, conteudo inalterado. Nenhuma referencia de codigo ao caminho antigo (confirmado por grep). Feito.
++
++7. **[Minor] sem rota catch-all** — `apps/web/src/App.tsx`: import de `Navigate` adicionado; rota `<Route path="*" element={<Navigate to="/" replace />} />` adicionada como ultima rota do `<Routes>`. Feito.
++
++8. **[Minor] MeusGrupos.tsx cita "Conexões" que nao existe mais** — texto do empty-state trocado de "em Conexões" pra "em Configurações". Feito.
++
++## Nao mexido (fora de escopo, conforme instrucao)
++- Duplicacao cosmetica de `overview.pending` em dois lugares de VisaoGeral.tsx.
++- Drift de `memberCount` em evento `group-participants.update` pra grupo nao sincronizado (auto-cura no proximo boot).
++
++## Verificacao
++- `npm run build --workspace=apps/api` — exit 0.
++- `npm run build --workspace=apps/web` — exit 0 (vite build ok, 53 modulos).
++- Grep por `RESUME-AMANHA` fora de `.superpowers/reviews/*.diff` (artefatos historicos) — nenhuma referencia de codigo.
+diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
+index f4df53a..286a08c 100644
+--- a/apps/api/prisma/schema.prisma
++++ b/apps/api/prisma/schema.prisma
+@@ -342,32 +342,32 @@ enum GroupMemberAction {
+ /// partir do deploy dessa feature -- entrada/saida anteriores a isso sao
+ /// desconhecidas, nao zero (ver GET /api/groups e o campo trackingSince).
+ model GroupMemberEvent {
+   id          String            @id @default(cuid())
+   groupJid    String
+   participant String
+   action      GroupMemberAction
+   occurredAt  DateTime          @default(now())
+ 
+   @@index([groupJid, occurredAt])
+ }
+ 
+ /// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}
+ /// {PRECO_ANTIGO} {LINK} {CUPOM}) trocados pelos dados da oferta na hora do
+ /// envio. `ctas` e um pool de chamadas finais -- uma sorteada por envio, pra
+-/// nao repetir sempre a mesma linha. Ainda nao e usado por nada: existe pra
+-/// alimentar a futura tela de Disparos.
++/// nao repetir sempre a mesma linha. Usado pelo Disparo (campo templateId)
++/// pra montar a mensagem de cada envio.
+ model MessageTemplate {
+   id        String   @id @default(cuid())
+   name      String   @unique
+   body      String
+   ctas      String[] @default([])
+   showImage Boolean  @default(true)
+   isDefault Boolean  @default(false)
+   createdAt DateTime @default(now())
+   updatedAt DateTime @updatedAt
+ 
+   disparos Disparo[]
+ }
+ 
+ enum DisparoStatus {
+   DRAFT // criado, aguardando a hora de comecar (imediato ja nasce SENDING)
+diff --git a/apps/api/src/routes/stats.ts b/apps/api/src/routes/stats.ts
+index 9e2df55..31de035 100644
+--- a/apps/api/src/routes/stats.ts
++++ b/apps/api/src/routes/stats.ts
+@@ -3,66 +3,68 @@ import type { FastifyInstance } from 'fastify';
+ import { prisma, num } from '../db.js';
+ 
+ const DAY_MS = 24 * 60 * 60 * 1000;
+ 
+ export async function statsRoutes(app: FastifyInstance) {
+   /**
+    * Painel principal. Tudo recortado pela janela de dias escolhida,
+    * porque desempenho de grupo de oferta so faz sentido comparado com
+    * o periodo anterior -- numero absoluto sozinho nao diz nada.
+    */
+   app.get<{ Querystring: { days?: string } }>('/api/stats/overview', async (req) => {
+     const days = Math.min(180, Math.max(1, Number(req.query.days ?? 30)));
+     const since = new Date(Date.now() - days * DAY_MS);
+     const previousSince = new Date(Date.now() - 2 * days * DAY_MS);
+ 
+-    const [sent, prevSent, clicks, prevClicks, conversions, prevConversions, pending, queued] =
++    const [sent, prevSent, clicks, prevClicks, conversions, prevConversions, pending, queued, dispatching] =
+       await Promise.all([
+         prisma.offer.count({ where: { status: OfferStatus.SENT, sentAt: { gte: since } } }),
+         prisma.offer.count({
+           where: { status: OfferStatus.SENT, sentAt: { gte: previousSince, lt: since } },
+         }),
+         prisma.click.count({ where: { clickedAt: { gte: since } } }),
+         prisma.click.count({ where: { clickedAt: { gte: previousSince, lt: since } } }),
+         prisma.conversion.aggregate({
+           where: { occurredAt: { gte: since } },
+           _sum: { commissionBrl: true, orderValue: true },
+           _count: true,
+         }),
+         prisma.conversion.aggregate({
+           where: { occurredAt: { gte: previousSince, lt: since } },
+           _sum: { commissionBrl: true },
+           _count: true,
+         }),
+         prisma.offer.count({ where: { status: OfferStatus.PENDING } }),
+         prisma.offer.count({ where: { status: OfferStatus.QUEUED } }),
++        prisma.offer.count({ where: { status: OfferStatus.DISPATCHING } }),
+       ]);
+ 
+     const revenue = num(conversions._sum.commissionBrl) ?? 0;
+     const prevRevenue = num(prevConversions._sum.commissionBrl) ?? 0;
+ 
+     return {
+       days,
+       sent: { value: sent, previous: prevSent },
+       clicks: { value: clicks, previous: prevClicks },
+       orders: { value: conversions._count, previous: prevConversions._count },
+       revenue: { value: revenue, previous: prevRevenue },
+       gmv: num(conversions._sum.orderValue) ?? 0,
+       clicksPerOffer: sent ? Number((clicks / sent).toFixed(1)) : 0,
+       conversionRate: clicks ? Number(((conversions._count / clicks) * 100).toFixed(2)) : 0,
+       pending,
+       queued,
++      dispatching,
+     };
+   });
+ 
+   /** Serie diaria pro grafico de cliques x comissao. */
+   app.get<{ Querystring: { days?: string } }>('/api/stats/timeseries', async (req) => {
+     const days = Math.min(180, Math.max(7, Number(req.query.days ?? 30)));
+     const since = new Date(Date.now() - days * DAY_MS);
+ 
+     const [clicks, conversions] = await Promise.all([
+       prisma.click.findMany({ where: { clickedAt: { gte: since } }, select: { clickedAt: true } }),
+       prisma.conversion.findMany({
+         where: { occurredAt: { gte: since } },
+         select: { occurredAt: true, commissionBrl: true },
+       }),
+     ]);
+diff --git a/apps/api/src/routes/templates.ts b/apps/api/src/routes/templates.ts
+index a8b2ab0..8c7800b 100644
+--- a/apps/api/src/routes/templates.ts
++++ b/apps/api/src/routes/templates.ts
+@@ -67,30 +67,36 @@ export async function templateRoutes(app: FastifyInstance) {
+     }
+ 
+     if (body.isDefault) {
+       await prisma.messageTemplate.updateMany({
+         where: { isDefault: true, id: { not: req.params.id } },
+         data: { isDefault: false },
+       });
+     }
+     const atualizado = await prisma.messageTemplate.update({ where: { id: req.params.id }, data: body });
+     return serialize(atualizado);
+   });
+ 
+   app.delete<{ Params: { id: string } }>('/api/templates/:id', async (req, reply) => {
+     const t = await prisma.messageTemplate.findUnique({ where: { id: req.params.id } });
+     if (!t) return { ok: true };
++
++    const emUso = await prisma.disparo.count({ where: { templateId: req.params.id } });
++    if (emUso > 0) {
++      return reply.code(409).send({ error: 'Esse modelo já foi usado em algum disparo e não pode ser apagado.' });
++    }
++
+     await prisma.messageTemplate.delete({ where: { id: req.params.id } });
+ 
+     // Apagou o padrão: promove o mais recente que sobrou, pra sempre existir
+     // um pré-selecionado enquanto houver ao menos um modelo.
+     if (t.isDefault) {
+       const proximo = await prisma.messageTemplate.findFirst({ orderBy: { createdAt: 'desc' } });
+       if (proximo) await prisma.messageTemplate.update({ where: { id: proximo.id }, data: { isDefault: true } });
+     }
+     return { ok: true };
+   });
+ 
+   /** Renderiza um corpo (ainda não salvo) contra uma oferta de mentira, pra UI mostrar o resultado sem precisar de oferta real. */
+   app.post('/api/templates/preview', async (req, reply) => {
+     const body = z
+       .object({ body: z.string(), ctas: z.array(z.string()).default([]) })
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index d3579b5..95b00be 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -1,17 +1,17 @@
+ import { useEffect, useState } from 'react';
+-import { Route, Routes } from 'react-router-dom';
++import { Navigate, Route, Routes } from 'react-router-dom';
+ import { api } from './api.js';
+ import { Layout } from './components/Layout.js';
+ import { Logo } from './components/Logo.js';
+ import { VisaoGeral } from './pages/VisaoGeral.js';
+ import { Fila } from './pages/Fila.js';
+ import { Desempenho } from './pages/Desempenho.js';
+ import { MeusGrupos } from './pages/MeusGrupos.js';
+ import { Garimpar } from './pages/Garimpar.js';
+ import { Nichos } from './pages/Nichos.js';
+ import { Produtos } from './pages/Produtos.js';
+ import { Agenda } from './pages/Agenda.js';
+ import { Automacoes } from './pages/Automacoes.js';
+ import { Disparos } from './pages/Disparos.js';
+ import { Configuracoes } from './pages/Configuracoes.js';
+ 
+@@ -81,19 +81,20 @@ export default function App() {
+ 
+   return (
+     <Layout>
+       <Routes>
+         <Route path="/" element={<VisaoGeral />} />
+         <Route path="/fila" element={<Fila />} />
+         <Route path="/desempenho" element={<Desempenho />} />
+         <Route path="/grupos" element={<MeusGrupos />} />
+         <Route path="/produtos" element={<Produtos />} />
+         <Route path="/nichos" element={<Nichos />} />
+         <Route path="/garimpar" element={<Garimpar />} />
+         <Route path="/agenda" element={<Agenda />} />
+         <Route path="/automacoes" element={<Automacoes />} />
+         <Route path="/disparos" element={<Disparos />} />
+         <Route path="/configuracoes" element={<Configuracoes />} />
++        <Route path="*" element={<Navigate to="/" replace />} />
+       </Routes>
+     </Layout>
+   );
+ }
+diff --git a/apps/web/src/pages/Garimpar.tsx b/apps/web/src/pages/Garimpar.tsx
+index ba5b688..75f57c6 100644
+--- a/apps/web/src/pages/Garimpar.tsx
++++ b/apps/web/src/pages/Garimpar.tsx
+@@ -90,35 +90,31 @@ export function Garimpar() {
+                 </option>
+               ))}
+             </select>
+           </div>
+           <div className="catbox">
+             {arvore.map((r) => (
+               <div key={r.id} className="catbox__grupo">
+                 <div className="catbox__raiz">
+                   {r.nome} <span>{int(r.itens)}</span>
+                 </div>
+                 {r.filhas.map((f) => (
+                   <div
+                     key={f.id}
+                     className="catbox__item"
+                     onClick={() => setCategoriaId(f.id)}
+-                    style={
+-                      categoriaId === f.id
+-                        ? { background: 'rgba(22, 23, 26, 0.06)', fontWeight: 700 }
+-                        : undefined
+-                    }
++                    data-picked={categoriaId === f.id}
+                   >
+                     <span>{f.nome}</span>
+                     <em>{int(f.itens)}</em>
+                   </div>
+                 ))}
+               </div>
+             ))}
+           </div>
+         </div>
+ 
+         <div>
+           {categoriaId === null && (
+             <div className="empty">
+               <strong>Escolha uma categoria</strong>
+               Clique em uma categoria à esquerda pra ver os produtos.
+diff --git a/apps/web/src/pages/MeusGrupos.tsx b/apps/web/src/pages/MeusGrupos.tsx
+index 7587970..019aceb 100644
+--- a/apps/web/src/pages/MeusGrupos.tsx
++++ b/apps/web/src/pages/MeusGrupos.tsx
+@@ -36,31 +36,31 @@ export function MeusGrupos() {
+         <div className="field" style={{ width: 180 }}>
+           <label htmlFor="days">Período</label>
+           <select id="days" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+             <option value={7}>Últimos 7 dias</option>
+             <option value={30}>Últimos 30 dias</option>
+             <option value={90}>Últimos 90 dias</option>
+           </select>
+         </div>
+       </div>
+ 
+       <div className="panel">
+         <h2 className="panel__title">Grupos</h2>
+         {groups === null ? null : groups.length === 0 ? (
+           <div className="empty">
+             <strong>Nenhum grupo sincronizado</strong>
+-            Conecte o WhatsApp e sincronize os grupos em Conexões para ver as métricas aqui.
++            Conecte o WhatsApp e sincronize os grupos em Configurações para ver as métricas aqui.
+           </div>
+         ) : (
+           <>
+             <table className="table">
+               <thead>
+                 <tr>
+                   <th>Grupo</th>
+                   <th className="num">Membros</th>
+                   <th className="num">Entraram</th>
+                   <th className="num">Saíram</th>
+                   <th>Rastreando desde</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {groups.map((g) => (
+diff --git a/apps/web/src/pages/VisaoGeral.tsx b/apps/web/src/pages/VisaoGeral.tsx
+index ca95cd0..7f14fb7 100644
+--- a/apps/web/src/pages/VisaoGeral.tsx
++++ b/apps/web/src/pages/VisaoGeral.tsx
+@@ -1,23 +1,24 @@
+ import { useEffect, useState } from 'react';
+ import { Link } from 'react-router-dom';
+ import { api, int } from '../api.js';
+ 
+ interface Overview {
+   sent: { value: number };
+   clicks: { value: number };
+   pending: number;
++  dispatching: number;
+ }
+ 
+ function Kpi({ label, value }: { label: string; value: string }) {
+   return (
+     <div className="kpi">
+       <div className="kpi__label">{label}</div>
+       <div className="kpi__value">{value}</div>
+     </div>
+   );
+ }
+ 
+ export function VisaoGeral() {
+   const [overview, setOverview] = useState<Overview | null>(null);
+   const [groups, setGroups] = useState<number | null>(null);
+ 
+@@ -53,34 +54,41 @@ export function VisaoGeral() {
+           <Link to="/fila">Ver fila →</Link>
+         </p>
+       </div>
+ 
+       <div style={{ height: 20 }} />
+ 
+       <div className="grid-kpi">
+         <Kpi label="Ofertas na fila" value={overview ? int(overview.pending) : '—'} />
+         <Kpi label="Cliques" value={overview ? int(overview.clicks.value) : '—'} />
+         <Kpi label="Enviadas hoje" value={overview ? int(overview.sent.value) : '—'} />
+         <Kpi label="Grupos ativos" value={groups === null ? '—' : int(groups)} />
+       </div>
+ 
+       <div className="panel">
+         <h2 className="panel__title">Disparos</h2>
+-        <div className="empty">
+-          <strong>Disparos ainda não existe</strong>
+-          Em breve.
+-        </div>
++        {overview && overview.dispatching > 0 ? (
++          <div className="empty">
++            <strong>{int(overview.dispatching)} oferta(s) em disparo agora</strong>
++            <Link to="/disparos">Ver disparos em andamento →</Link>
++          </div>
++        ) : (
++          <div className="empty">
++            <strong>Nenhum disparo em andamento</strong>
++            <Link to="/disparos">Começar um disparo →</Link>
++          </div>
++        )}
+       </div>
+ 
+       <div className="split">
+         <div className="panel">
+           <h2 className="panel__title">Ranking de conversão</h2>
+           <p>Ainda não construído — vai mostrar quais grupos convertem melhor.</p>
+         </div>
+         <div className="panel">
+           <h2 className="panel__title">Melhores horários para disparar</h2>
+           <p>Ainda não construído — vai apontar os horários com mais clique.</p>
+         </div>
+       </div>
+     </>
+   );
+ }
+diff --git a/apps/web/src/styles.css b/apps/web/src/styles.css
+index 5469b97..211a0c2 100644
+--- a/apps/web/src/styles.css
++++ b/apps/web/src/styles.css
+@@ -890,30 +890,35 @@ button.chip {
+ }
+ 
+ .catbox__item {
+   display: flex;
+   align-items: center;
+   gap: 8px;
+   padding: 5px 10px;
+   font-size: 13px;
+   cursor: pointer;
+ }
+ 
+ .catbox__item:hover {
+   background: rgba(22, 23, 26, 0.04);
+ }
+ 
++.catbox__item[data-picked='true'] {
++  background: var(--brand);
++  font-weight: 700;
++}
++
+ .catbox__item input {
+   width: auto;
+   flex: none;
+   accent-color: var(--ink);
+ }
+ 
+ .catbox__item span {
+   flex: 1;
+ }
+ 
+ .catbox__item em {
+   font-family: var(--mono);
+   font-style: normal;
+   font-size: 11px;
+   color: var(--muted);
+@@ -1435,31 +1440,32 @@ button.chip {
+ [data-theme='dark'] .tabs__item[data-on='true'] {
+   background: #3a3b40;
+   border-color: #3a3b40;
+ }
+ 
+ [data-theme='dark'] .steps__item[data-on='true'] .steps__num {
+   background: #3a3b40;
+   border-color: #3a3b40;
+ }
+ 
+ [data-theme='dark'] .rail__count,
+ [data-theme='dark'] .btn--tag,
+ [data-theme='dark'] .tag__score,
+ [data-theme='dark'] .tabs__item[data-on='true'] span,
+ [data-theme='dark'] .card__selo,
+-[data-theme='dark'] .card__nicho {
++[data-theme='dark'] .card__nicho,
++[data-theme='dark'] .catbox__item[data-picked='true'] {
+   color: #16171a;
+ }
+ 
+ /* Caixa de estado vazio usava branco translúcido sobre o papel claro;
+    em fundo escuro isso lava pra um bloco claro com texto var(--ink)
+    (agora claro) em cima -- quase ilegível. */
+ [data-theme='dark'] .empty {
+   background: rgba(255, 255, 255, 0.04);
+ }
+ 
+ /* O poço da foto do card fica claro de propósito nos dois temas (fundo
+    neutro pra foto de loja), então o texto "sem foto" não pode seguir o
+    flip de --muted -- ficaria cinza claro sobre fundo claro. */
+ [data-theme='dark'] .card__semfoto {
+   color: #74787f;

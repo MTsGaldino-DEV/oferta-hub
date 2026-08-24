@@ -1,0 +1,161 @@
+eff2c08 feat(web): configuracoes reestruturada com abas Conexoes/Modelos
+ .superpowers/configuracoes-report.md | 14 ++++++++++++++
+ apps/web/src/App.tsx                 |  6 ++----
+ apps/web/src/components/Layout.tsx   |  3 +--
+ apps/web/src/pages/Configuracoes.tsx | 22 ++++++++++++++++++++++
+ 4 files changed, 39 insertions(+), 6 deletions(-)
+diff --git a/.superpowers/configuracoes-report.md b/.superpowers/configuracoes-report.md
+new file mode 100644
+index 0000000..42f2479
+--- /dev/null
++++ b/.superpowers/configuracoes-report.md
+@@ -0,0 +1,14 @@
++# Configurações: fusão de Conexões + Templates em abas
++
++## Arquivos alterados
++- `apps/web/src/pages/Configuracoes.tsx` (novo) — estado local `tab`, barra `.tabs` com dois `.tabs__item` ("Conexões" / "Modelos de mensagem"), renderiza `<Conexoes />` ou `<Templates />` sem alterar nada dentro delas.
++- `apps/web/src/App.tsx` — trocou os imports de `Templates`/`Conexoes` por `Configuracoes`; removeu as rotas `/templates` e `/conexoes`; adicionou `/configuracoes`.
++- `apps/web/src/components/Layout.tsx` — grupo "Automação" perdeu o item `Modelos` (`/templates`); grupo "Configurações" agora aponta pra `/configuracoes` com label "Configurações" (antes era "Conexões" → `/conexoes`).
++
++## Build
++`npm run build --workspace=apps/web` (tsc -b && vite build) — passou, exit 0, sem erros de tipo.
++
++## Decisões/observações não explícitas no pedido
++- O label do item de nav em "Configurações" foi trocado de "Conexões" para "Configurações", já que a página agora cobre conexões + modelos, não só conexões. A task não especificou o texto do label, só a rota; achei a troca óbvia dado o novo escopo da página.
++- `Conexoes.tsx` e `Templates.tsx` não foram tocados — seus `export function` continuam iguais, cada um ainda renderiza seu próprio `<div className="head">` com h1/subtítulo, agora abaixo da barra de abas.
++- Grep confirmou que não sobrou nenhuma referência a `/templates` ou `/conexoes` como rota em `apps/web/src` (chamadas a `/api/templates` e `/api/platforms` em `Disparos.tsx`/`Templates.tsx`/`Conexoes.tsx` foram preservadas, são endpoints de API, não rotas de página).
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index 7fd718c..64c97d7 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -1,31 +1,30 @@
+ import { useEffect, useState } from 'react';
+ import { Route, Routes } from 'react-router-dom';
+ import { api } from './api.js';
+ import { Layout } from './components/Layout.js';
+ import { Logo } from './components/Logo.js';
+ import { VisaoGeral } from './pages/VisaoGeral.js';
+ import { Fila } from './pages/Fila.js';
+ import { Desempenho } from './pages/Desempenho.js';
+ import { MeusGrupos } from './pages/MeusGrupos.js';
+ import { Nichos } from './pages/Nichos.js';
+ import { Produtos } from './pages/Produtos.js';
+ import { Agenda } from './pages/Agenda.js';
+ import { Automacoes } from './pages/Automacoes.js';
+ import { Disparos } from './pages/Disparos.js';
+-import { Templates } from './pages/Templates.js';
+-import { Conexoes } from './pages/Conexoes.js';
++import { Configuracoes } from './pages/Configuracoes.js';
+ 
+ function Login({ onIn }: { onIn: () => void }) {
+   const [password, setPassword] = useState('');
+   const [error, setError] = useState<string | null>(null);
+   const [busy, setBusy] = useState(false);
+ 
+   async function submit() {
+     setBusy(true);
+     setError(null);
+     try {
+       await api.post('/api/login', { password });
+       onIn();
+     } catch (err) {
+       setError(err instanceof Error ? err.message : 'Não deu para entrar.');
+     } finally {
+@@ -79,21 +78,20 @@ export default function App() {
+   if (auth === null) return null;
+   if (!auth) return <Login onIn={() => setAuth(true)} />;
+ 
+   return (
+     <Layout>
+       <Routes>
+         <Route path="/" element={<VisaoGeral />} />
+         <Route path="/fila" element={<Fila />} />
+         <Route path="/desempenho" element={<Desempenho />} />
+         <Route path="/grupos" element={<MeusGrupos />} />
+         <Route path="/produtos" element={<Produtos />} />
+         <Route path="/nichos" element={<Nichos />} />
+         <Route path="/agenda" element={<Agenda />} />
+         <Route path="/automacoes" element={<Automacoes />} />
+         <Route path="/disparos" element={<Disparos />} />
+-        <Route path="/templates" element={<Templates />} />
+-        <Route path="/conexoes" element={<Conexoes />} />
++        <Route path="/configuracoes" element={<Configuracoes />} />
+       </Routes>
+     </Layout>
+   );
+ }
+diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
+index 265bd52..5c6ce28 100644
+--- a/apps/web/src/components/Layout.tsx
++++ b/apps/web/src/components/Layout.tsx
+@@ -9,41 +9,40 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
+   { label: null, items: [{ to: '/', label: 'Visão geral', end: true }] },
+   { label: null, items: [{ to: '/fila', label: 'Fila' }] },
+   {
+     label: 'Catálogo',
+     items: [
+       { to: '/nichos', label: 'Nichos' },
+       { to: '/produtos', label: 'Preços vigiados' },
+     ],
+   },
+   {
+     label: 'Automação',
+     items: [
+       { to: '/agenda', label: 'Agenda' },
+       { to: '/automacoes', label: 'Automações' },
+       { to: '/disparos', label: 'Disparos' },
+-      { to: '/templates', label: 'Modelos' },
+     ],
+   },
+   {
+     label: 'Métricas',
+     items: [
+       { to: '/desempenho', label: 'Desempenho' },
+       { to: '/grupos', label: 'Meus Grupos' },
+     ],
+   },
+-  { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
++  { label: 'Configurações', items: [{ to: '/configuracoes', label: 'Configurações' }] },
+ ];
+ 
+ export function Layout({ children }: { children: React.ReactNode }) {
+   const [pending, setPending] = useState(0);
+   const [wa, setWa] = useState<{ status: string; quota: { used: number; cap: number } } | null>(null);
+   const location = useLocation();
+ 
+   useEffect(() => {
+     api.get<{ pending: number }>('/api/stats/overview?days=30').then((s) => setPending(s.pending)).catch(() => {});
+     api.get<any>('/api/whatsapp/status').then(setWa).catch(() => {});
+   }, [location.pathname]);
+ 
+   const online = wa?.status === 'connected';
+ 
+   return (
+diff --git a/apps/web/src/pages/Configuracoes.tsx b/apps/web/src/pages/Configuracoes.tsx
+new file mode 100644
+index 0000000..4f00f90
+--- /dev/null
++++ b/apps/web/src/pages/Configuracoes.tsx
+@@ -0,0 +1,22 @@
++import { useState } from 'react';
++import { Conexoes } from './Conexoes.js';
++import { Templates } from './Templates.js';
++
++export function Configuracoes() {
++  const [tab, setTab] = useState<'conexoes' | 'modelos'>('conexoes');
++
++  return (
++    <>
++      <div className="tabs">
++        <button className="tabs__item" data-on={tab === 'conexoes'} onClick={() => setTab('conexoes')}>
++          Conexões
++        </button>
++        <button className="tabs__item" data-on={tab === 'modelos'} onClick={() => setTab('modelos')}>
++          Modelos de mensagem
++        </button>
++      </div>
++
++      {tab === 'conexoes' ? <Conexoes /> : <Templates />}
++    </>
++  );
++}

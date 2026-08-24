@@ -1,4 +1,4 @@
-# Oferta Hub — Contexto Geral
+# Hub Ofertas — Contexto Geral
 
 ## O que é
 

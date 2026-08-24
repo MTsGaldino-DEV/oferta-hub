@@ -44,6 +44,8 @@ export interface Offer {
   discountPct: number | null;
   commissionBrl: number | null;
   message: string;
+  nicheId: string | null;
+  nicho: string | null;
   shortCode: string | null;
   clicks: number;
   scheduledFor: string | null;
@@ -58,5 +60,7 @@ export interface Offer {
     canonicalUrl: string;
     rating: number | null;
     reviewCount: number | null;
+    soldCount: number | null;
+    commissionPct: number | null;
   };
 }

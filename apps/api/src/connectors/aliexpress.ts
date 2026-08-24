@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Platform } from '@prisma/client';
 import { request } from '../lib/http.js';
 import { loadCredentials } from './credentials.js';
+import { exigeKeyword } from './types.js';
 import type { Connector, NormalizedProduct } from './types.js';
 
 /**
@@ -85,9 +86,10 @@ export const aliexpress: Connector = {
   },
 
   async search({ keyword, maxPrice, limit = 20 }) {
+    const termo = exigeKeyword(keyword, 'AliExpress');
     const c = await loadCredentials(Platform.ALIEXPRESS);
     const data = await call<any>('aliexpress.affiliate.product.query', {
-      keywords: keyword,
+      keywords: termo,
       page_size: String(Math.min(limit, 50)),
       target_currency: 'BRL',
       target_language: 'PT',

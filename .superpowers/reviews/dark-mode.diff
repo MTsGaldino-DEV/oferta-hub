@@ -1,0 +1,226 @@
+ba5b576 feat(web): modo escuro com toggle em Conexões
+---
+ apps/web/src/main.tsx           |  3 ++
+ apps/web/src/pages/Conexoes.tsx | 25 ++++++++++++++++
+ apps/web/src/styles.css         | 65 +++++++++++++++++++++++++++++++++++++++++
+ apps/web/src/theme.ts           | 16 ++++++++++
+ 4 files changed, 109 insertions(+)
+---
+diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
+index 1160619..d60fadb 100644
+--- a/apps/web/src/main.tsx
++++ b/apps/web/src/main.tsx
+@@ -1,13 +1,16 @@
+ import React from 'react';
+ import ReactDOM from 'react-dom/client';
+ import { BrowserRouter } from 'react-router-dom';
+ import App from './App.js';
+ import './styles.css';
++import { applyStoredTheme } from './theme.js';
++
++applyStoredTheme();
+ 
+ ReactDOM.createRoot(document.getElementById('root')!).render(
+   <React.StrictMode>
+     <BrowserRouter>
+       <App />
+     </BrowserRouter>
+   </React.StrictMode>,
+ );
+diff --git a/apps/web/src/pages/Conexoes.tsx b/apps/web/src/pages/Conexoes.tsx
+index d14da31..212e802 100644
+--- a/apps/web/src/pages/Conexoes.tsx
++++ b/apps/web/src/pages/Conexoes.tsx
+@@ -1,12 +1,13 @@
+ import { useEffect, useState } from 'react';
+ import { api } from '../api.js';
++import { getTheme, setTheme } from '../theme.js';
+ 
+ interface PlatformInfo {
+   platform: string;
+   label: string;
+   connected: boolean;
+   lastCheck: string | null;
+   lastError: string | null;
+   preview: Record<string, string>;
+   fields: { name: string; label: string; secret: boolean; help?: string }[];
+ }
+@@ -201,31 +202,55 @@ export function Conexoes() {
+                   void loadWa();
+                 }}
+               >
+                 Apagar sessão e parear do zero
+               </button>
+             </div>
+           </>
+         )}
+       </div>
+ 
++      <AparenciaCard />
++
+       <ExtensaoCard />
+ 
+       {[...platforms]
+         .sort((a, b) => Number(b.connected) - Number(a.connected))
+         .map((p) => (
+           <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
+         ))}
+     </>
+   );
+ }
+ 
++function AparenciaCard() {
++  const [theme, setThemeState] = useState(getTheme());
++
++  return (
++    <div className="panel">
++      <h2 className="panel__title">Aparência</h2>
++      <div className="row">
++        <button
++          className="btn btn--ghost"
++          onClick={() => {
++            const next = theme === 'dark' ? 'light' : 'dark';
++            setTheme(next);
++            setThemeState(next);
++          }}
++        >
++          {theme === 'dark' ? 'Modo claro' : 'Modo escuro'}
++        </button>
++      </div>
++    </div>
++  );
++}
++
+ /**
+  * A extensao do navegador e o unico caminho pro Mercado Livre: eles nao tem
+  * API de afiliados e bloqueiam leitura de fora. Ela autentica por este token,
+  * nao pela sessao do painel -- fala de outra origem e nao carrega o cookie.
+  */
+ function ExtensaoCard() {
+   const [token, setToken] = useState<string | null>(null);
+   const [aberto, setAberto] = useState(false);
+   const [copiado, setCopiado] = useState(false);
+ 
+diff --git a/apps/web/src/styles.css b/apps/web/src/styles.css
+index 75f6f87..99dbb78 100644
+--- a/apps/web/src/styles.css
++++ b/apps/web/src/styles.css
+@@ -19,20 +19,34 @@
+   --muted: #74787f;
+   --line: #d8dadd;
+ 
+   --display: 'Archivo', system-ui, sans-serif;
+   --mono: 'IBM Plex Mono', ui-monospace, monospace;
+ 
+   --r: 3px;
+   --shadow: 0 1px 0 rgba(22, 23, 26, 0.06), 0 2px 8px rgba(22, 23, 26, 0.06);
+ }
+ 
++/* Modo escuro: mesmos nomes de token, valores invertidos. --brand/--tag,
++   --display, --mono e --r ficam de fora -- não mudam entre temas. */
++[data-theme='dark'] {
++  --ink: #f2f2f0;
++  --canvas: #1c1d20;
++  --surface: #232427;
++  --drop: #ff6b52;
++  --gain: #22a866;
++  --muted: #9a9da3;
++  --line: #34353a;
++
++  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 2px 10px rgba(0, 0, 0, 0.5);
++}
++
+ * {
+   box-sizing: border-box;
+ }
+ 
+ html,
+ body,
+ #root {
+   height: 100%;
+ }
+ 
+@@ -1319,10 +1333,61 @@ button.chip {
+ 
+   .card__botoes {
+     grid-template-columns: 1fr 1.6fr;
+     gap: 10px;
+   }
+ 
+   .card__enviar {
+     font-size: 12.5px;
+   }
+ }
++
++/* ---------------------------------------------------------------
++   Modo escuro: ajustes pontuais
++   O flip de token quebra qualquer lugar que usava --ink como FUNDO
++   escuro fixo (rail, botão primário, aba ativa, mark do login) --
++   nesses o --ink virou texto claro, então o fundo precisa ficar preso
++   num tom escuro. E qualquer lugar com texto var(--ink) sobre fundo
++   var(--brand)/var(--tag) (que não muda de cor) também precisa do
++   texto preso em escuro, senão vira texto quase-branco sobre amarelo.
++   --------------------------------------------------------------- */
++
++[data-theme='dark'] .rail {
++  background: #16171a;
++}
++
++[data-theme='dark'] .login__mark {
++  background: #16171a;
++}
++
++[data-theme='dark'] .btn:not(.btn--ghost):not(.btn--tag) {
++  background: #3a3b40;
++  border-color: #3a3b40;
++}
++
++[data-theme='dark'] .tabs__item[data-on='true'] {
++  background: #3a3b40;
++  border-color: #3a3b40;
++}
++
++[data-theme='dark'] .rail__count,
++[data-theme='dark'] .btn--tag,
++[data-theme='dark'] .tag__score,
++[data-theme='dark'] .tabs__item[data-on='true'] span,
++[data-theme='dark'] .card__selo,
++[data-theme='dark'] .card__nicho {
++  color: #16171a;
++}
++
++/* Caixa de estado vazio usava branco translúcido sobre o papel claro;
++   em fundo escuro isso lava pra um bloco claro com texto var(--ink)
++   (agora claro) em cima -- quase ilegível. */
++[data-theme='dark'] .empty {
++  background: rgba(255, 255, 255, 0.04);
++}
++
++/* O poço da foto do card fica claro de propósito nos dois temas (fundo
++   neutro pra foto de loja), então o texto "sem foto" não pode seguir o
++   flip de --muted -- ficaria cinza claro sobre fundo claro. */
++[data-theme='dark'] .card__semfoto {
++  color: #74787f;
++}
+diff --git a/apps/web/src/theme.ts b/apps/web/src/theme.ts
+new file mode 100644
+index 0000000..6b0568b
+--- /dev/null
++++ b/apps/web/src/theme.ts
+@@ -0,0 +1,16 @@
++const KEY = 'hub-theme';
++
++export type Theme = 'light' | 'dark';
++
++export function getTheme(): Theme {
++  return localStorage.getItem(KEY) === 'dark' ? 'dark' : 'light';
++}
++
++export function setTheme(theme: Theme): void {
++  localStorage.setItem(KEY, theme);
++  document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : '';
++}
++
++export function applyStoredTheme(): void {
++  setTheme(getTheme());
++}

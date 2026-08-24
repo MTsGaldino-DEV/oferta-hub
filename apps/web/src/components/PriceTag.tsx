@@ -3,19 +3,33 @@ import { brl, STORE, type Offer } from '../api.js';
 
 interface Props {
   offer: Offer;
+  /** Posicao dessa oferta na fila atual (1 = proxima a sair). */
+  posicao: number;
   onSend: (id: string) => Promise<void>;
   onSkip: (id: string) => Promise<void>;
   onEdit: (offer: Offer) => void;
 }
 
+/** "+38 mil vendidos". Abaixo de mil, o numero cheio -- arredondar mentiria. */
+function vendidos(n: number | null): string | null {
+  if (!n || n < 1) return null;
+  if (n < 1000) return `${n} vendidos`;
+  return `+${Math.floor(n / 1000)} mil vendidos`;
+}
+
+/** Acima disso a prateleira ja provou que o produto sai. */
+const CAMPEAO = 5000;
+
 /**
- * Etiqueta de preço. É o elemento principal do painel: você bate o olho no
- * preço, confere a nota e as razões dela, e decide.
+ * Card da fila. E onde voce decide "manda ou pula", entao a hierarquia e:
+ * foto, preco, quanto paga. A nota fica de canto -- ela ordena a fila, mas
+ * quem decide olha o produto.
  */
-export function PriceTag({ offer, onSend, onSkip, onEdit }: Props) {
+export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
   const [busy, setBusy] = useState<'send' | 'skip' | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [porque, setPorque] = useState(false);
 
   async function act(kind: 'send' | 'skip') {
     setBusy(kind);
@@ -30,67 +44,97 @@ export function PriceTag({ offer, onSend, onSkip, onEdit }: Props) {
     }
   }
 
+  const vendas = vendidos(offer.product.soldCount);
+  const desconto = offer.discountPct ? Math.round(offer.discountPct) : 0;
+
   return (
-    <article className="tag" data-leaving={leaving}>
-      <div className="tag__score" title="Nota de 0 a 100 calculada pelo histórico, desconto, comissão e reputação">
-        {offer.score}
+    <article className="card" data-leaving={leaving}>
+      <div className="card__well">
+        {offer.product.imageUrl ? (
+          <img src={offer.product.imageUrl} alt="" loading="lazy" />
+        ) : (
+          <span className="card__semfoto">sem foto</span>
+        )}
+        {desconto > 0 && <span className="card__off--badge">-{desconto}%</span>}
+        <span
+          className="card__nota"
+          title="Nota de 0 a 100: histórico de preço, desconto, comissão e reputação"
+        >
+          {offer.score}
+        </span>
       </div>
 
-      <div className="tag__top">
-        {offer.product.imageUrl && (
-          <img className="tag__thumb" src={offer.product.imageUrl} alt="" loading="lazy" />
-        )}
-        <div>
-          <h3 className="tag__title">{offer.product.title}</h3>
-          <div className="tag__store">
-            {STORE[offer.product.platform]} · {offer.source === 'MANUAL' ? 'manual' : offer.source === 'WATCHLIST' ? 'queda de preço' : 'garimpo'}
+      <div className="card__corpo">
+        <span className="card__posicao" title="Posição na fila de envio atual">
+          #{posicao}
+        </span>
+        {(offer.product.soldCount ?? 0) >= CAMPEAO && <span className="card__selo">Mais vendido</span>}
+
+        <h3 className="card__titulo">{offer.product.title}</h3>
+
+        <div className="card__meta">
+          {offer.product.rating ? (
+            <span className="card__estrela">★ {offer.product.rating.toFixed(1)}</span>
+          ) : null}
+          {vendas && <span>{vendas}</span>}
+        </div>
+
+        {offer.commissionBrl ? (
+          <div className="card__ganho">
+            Ganha {brl(offer.commissionBrl)}
+            {offer.product.commissionPct ? <em>{offer.product.commissionPct.toFixed(0)}%</em> : null}
+          </div>
+        ) : null}
+
+        <div className="card__precos">
+          {offer.comparePrice && offer.comparePrice > offer.price ? (
+            <span className="card__antes">{brl(offer.comparePrice)}</span>
+          ) : null}
+          <div className="card__linha">
+            <span className="card__agora">{brl(offer.price)}</span>
           </div>
         </div>
-      </div>
 
-      <div className="tag__price">
-        <span className="tag__now">{brl(offer.price)}</span>
-        {offer.comparePrice && offer.comparePrice > offer.price && (
-          <span className="tag__was">{brl(offer.comparePrice)}</span>
+        <div className="card__origem">
+          {STORE[offer.product.platform]}
+          {offer.nicho && <span className="card__nicho">{offer.nicho}</span>}
+        </div>
+
+        {error && <div className="card__erro">{error}</div>}
+
+        {/* Pular e Enviar ficam lado a lado, os dois com alvo grande. Enviar e
+            irreversivel, entao errar o Pular nao pode cair nele: empilhados,
+            um deslize de 2px pro lado errado manda a oferta pro grupo. */}
+        <div className="card__acoes">
+          <div className="card__botoes">
+            <button className="btn btn--ghost btn--alvo" disabled={busy !== null} onClick={() => void act('skip')}>
+              {busy === 'skip' ? '...' : 'Pular'}
+            </button>
+            <button className="btn btn--alvo card__enviar" disabled={busy !== null} onClick={() => void act('send')}>
+              {busy === 'send' ? 'Enviando...' : 'Enviar ao grupo'}
+            </button>
+          </div>
+          <div className="card__links">
+            <button onClick={() => onEdit(offer)}>Ver texto</button>
+            <button onClick={() => setPorque((v) => !v)}>{porque ? 'Fechar' : 'Por quê?'}</button>
+          </div>
+        </div>
+
+        {/* A justificativa da nota so aparece sob demanda: ela e util quando
+            voce duvida do card, e ruido nos outros 90% das vezes. */}
+        {porque && (
+          <ul className="card__razoes">
+            {offer.scoreReasons.map((r, i) => (
+              <li key={i} data-neg={r.points < 0}>
+                <span>{r.detail}</span>
+                <b>
+                  {r.points > 0 ? '+' : ''}
+                  {r.points}
+                </b>
+              </li>
+            ))}
+          </ul>
         )}
-        {offer.discountPct ? <span className="tag__off">−{Math.round(offer.discountPct)}%</span> : null}
-      </div>
-
-      {offer.commissionBrl ? (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--muted)' }}>
-          comissão estimada {brl(offer.commissionBrl)}
-        </div>
-      ) : null}
-
-      <ul className="tag__reasons">
-        {offer.scoreReasons.slice(0, 4).map((r, i) => (
-          <li key={i} data-neg={r.points < 0}>
-            <span>{r.detail}</span>
-            <b>
-              {r.points > 0 ? '+' : ''}
-              {r.points}
-            </b>
-          </li>
-        ))}
-      </ul>
-
-      {error && (
-        <div className="notice" style={{ marginTop: 12, marginBottom: 0 }}>
-          {error}
-        </div>
-      )}
-
-      <div className="tag__actions">
-        <button className="btn btn--tag" disabled={busy !== null} onClick={() => void act('send')}>
-          {busy === 'send' ? 'Enviando...' : 'Enviar ao grupo'}
-        </button>
-        <button className="btn btn--ghost btn--sm" onClick={() => onEdit(offer)}>
-          Ver texto
-        </button>
-        <span className="tag__spacer" />
-        <button className="btn btn--ghost btn--sm" disabled={busy !== null} onClick={() => void act('skip')}>
-          Pular
-        </button>
       </div>
     </article>
   );

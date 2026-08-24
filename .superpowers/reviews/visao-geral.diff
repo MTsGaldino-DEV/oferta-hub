@@ -1,0 +1,196 @@
+6063df0 feat(web): nova página Visão Geral como rota raiz, Fila move pra /fila
+32eee90 docs: plano de retomada pra amanhã (dark mode ok, visão geral em andamento)
+---
+ .superpowers/overnight-progress.md |  49 +++++++++++
+ RESUME-AMANHA.md                   | 169 +++++++++++++++++++++++++++++++++++++
+ apps/web/src/App.tsx               |   4 +-
+ apps/web/src/components/Layout.tsx |   5 +-
+ apps/web/src/pages/VisaoGeral.tsx  |  86 +++++++++++++++++++
+ 5 files changed, 310 insertions(+), 3 deletions(-)
+---
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index 62f5258..8a3ec72 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -1,15 +1,16 @@
+ import { useEffect, useState } from 'react';
+ import { Route, Routes } from 'react-router-dom';
+ import { api } from './api.js';
+ import { Layout } from './components/Layout.js';
+ import { Logo } from './components/Logo.js';
++import { VisaoGeral } from './pages/VisaoGeral.js';
+ import { Fila } from './pages/Fila.js';
+ import { Desempenho } from './pages/Desempenho.js';
+ import { Nichos } from './pages/Nichos.js';
+ import { Produtos } from './pages/Produtos.js';
+ import { Agenda } from './pages/Agenda.js';
+ import { Automacoes } from './pages/Automacoes.js';
+ import { Conexoes } from './pages/Conexoes.js';
+ 
+ function Login({ onIn }: { onIn: () => void }) {
+   const [password, setPassword] = useState('');
+@@ -71,21 +72,22 @@ export default function App() {
+       .then((r) => setAuth(r.authenticated))
+       .catch(() => setAuth(false));
+   }, []);
+ 
+   if (auth === null) return null;
+   if (!auth) return <Login onIn={() => setAuth(true)} />;
+ 
+   return (
+     <Layout>
+       <Routes>
+-        <Route path="/" element={<Fila />} />
++        <Route path="/" element={<VisaoGeral />} />
++        <Route path="/fila" element={<Fila />} />
+         <Route path="/desempenho" element={<Desempenho />} />
+         <Route path="/produtos" element={<Produtos />} />
+         <Route path="/nichos" element={<Nichos />} />
+         <Route path="/agenda" element={<Agenda />} />
+         <Route path="/automacoes" element={<Automacoes />} />
+         <Route path="/conexoes" element={<Conexoes />} />
+       </Routes>
+     </Layout>
+   );
+ }
+diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
+index 6e5e391..0432878 100644
+--- a/apps/web/src/components/Layout.tsx
++++ b/apps/web/src/components/Layout.tsx
+@@ -1,19 +1,20 @@
+ import { NavLink, useLocation } from 'react-router-dom';
+ import { useEffect, useState } from 'react';
+ import { api } from '../api.js';
+ import { Logo } from './Logo.js';
+ 
+ type NavLinkDef = { to: string; label: string; end?: boolean };
+ 
+ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
+-  { label: null, items: [{ to: '/', label: 'Fila', end: true }] },
++  { label: null, items: [{ to: '/', label: 'Visão geral', end: true }] },
++  { label: null, items: [{ to: '/fila', label: 'Fila' }] },
+   {
+     label: 'Catálogo',
+     items: [
+       { to: '/nichos', label: 'Nichos' },
+       { to: '/produtos', label: 'Preços vigiados' },
+     ],
+   },
+   {
+     label: 'Automação',
+     items: [
+@@ -47,21 +48,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
+           </div>
+         </div>
+ 
+         <nav className="rail__nav">
+           {GROUPS.map((g, gi) => (
+             <div className="rail__group" key={gi}>
+               {g.label && <div className="rail__group-label">{g.label}</div>}
+               {g.items.map((l) => (
+                 <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
+                   {l.label}
+-                  {l.to === '/' && pending > 0 && <span className="rail__count">{pending}</span>}
++                  {l.to === '/fila' && pending > 0 && <span className="rail__count">{pending}</span>}
+                 </NavLink>
+               ))}
+             </div>
+           ))}
+         </nav>
+ 
+         <div className="rail__foot">
+           <div className="rail__user">
+             <div className="rail__user__row">
+               <span className="rail__user__status">
+diff --git a/apps/web/src/pages/VisaoGeral.tsx b/apps/web/src/pages/VisaoGeral.tsx
+new file mode 100644
+index 0000000..ca95cd0
+--- /dev/null
++++ b/apps/web/src/pages/VisaoGeral.tsx
+@@ -0,0 +1,86 @@
++import { useEffect, useState } from 'react';
++import { Link } from 'react-router-dom';
++import { api, int } from '../api.js';
++
++interface Overview {
++  sent: { value: number };
++  clicks: { value: number };
++  pending: number;
++}
++
++function Kpi({ label, value }: { label: string; value: string }) {
++  return (
++    <div className="kpi">
++      <div className="kpi__label">{label}</div>
++      <div className="kpi__value">{value}</div>
++    </div>
++  );
++}
++
++export function VisaoGeral() {
++  const [overview, setOverview] = useState<Overview | null>(null);
++  const [groups, setGroups] = useState<number | null>(null);
++
++  useEffect(() => {
++    api.get<Overview>('/api/stats/overview?days=1').then(setOverview).catch(() => {});
++    api
++      .get<any>('/api/whatsapp/status')
++      .then((s) => setGroups(s.groups.length))
++      .catch(() => {});
++  }, []);
++
++  return (
++    <>
++      <div className="head">
++        <div>
++          <h1>Visão geral</h1>
++          <p>Um retrato rápido do que está na fila e do que saiu hoje. Pra métrica de verdade, veja Desempenho.</p>
++        </div>
++      </div>
++
++      <div className="panel panel--hero">
++        <h2 className="panel__title">Capturar oferta</h2>
++        <p>Cole um link ou busque nas lojas conectadas — a fila é onde você decide manda ou pula.</p>
++        <Link className="btn" to="/fila">
++          Ir para a fila
++        </Link>
++      </div>
++
++      <div className="panel">
++        <div className="kpi__label">Ofertas esperando revisão</div>
++        <div className="kpi__value">{overview ? int(overview.pending) : '—'}</div>
++        <p style={{ marginTop: 8 }}>
++          <Link to="/fila">Ver fila →</Link>
++        </p>
++      </div>
++
++      <div style={{ height: 20 }} />
++
++      <div className="grid-kpi">
++        <Kpi label="Ofertas na fila" value={overview ? int(overview.pending) : '—'} />
++        <Kpi label="Cliques" value={overview ? int(overview.clicks.value) : '—'} />
++        <Kpi label="Enviadas hoje" value={overview ? int(overview.sent.value) : '—'} />
++        <Kpi label="Grupos ativos" value={groups === null ? '—' : int(groups)} />
++      </div>
++
++      <div className="panel">
++        <h2 className="panel__title">Disparos</h2>
++        <div className="empty">
++          <strong>Disparos ainda não existe</strong>
++          Em breve.
++        </div>
++      </div>
++
++      <div className="split">
++        <div className="panel">
++          <h2 className="panel__title">Ranking de conversão</h2>
++          <p>Ainda não construído — vai mostrar quais grupos convertem melhor.</p>
++        </div>
++        <div className="panel">
++          <h2 className="panel__title">Melhores horários para disparar</h2>
++          <p>Ainda não construído — vai apontar os horários com mais clique.</p>
++        </div>
++      </div>
++    </>
++  );
++}

@@ -11,14 +11,6 @@ interface PlatformInfo {
   fields: { name: string; label: string; secret: boolean; help?: string }[];
 }
 
-interface WaStatus {
-  status: 'disconnected' | 'connecting' | 'qr' | 'connected';
-  qr: string | null;
-  me: string | null;
-  quota: { used: number; cap: number };
-  groups: { jid: string; name: string; isDefault: boolean }[];
-}
-
 function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => void }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [open, setOpen] = useState(!info.connected);
@@ -58,12 +50,12 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 16 }}>{info.label}</strong>
         <span className="chip" data-tone={info.connected ? (info.lastError ? 'off' : 'on') : undefined}>
-          {info.connected ? (info.lastError ? 'com erro' : 'conectada') : 'não configurada'}
+          {info.connected ? (info.lastError ? 'Com erro' : 'Conectado') : 'Pendente'}
         </span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           {info.connected && (
             <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void test()}>
-              Testar
+              Validar conexão
             </button>
           )}
           <button className="btn btn--ghost btn--sm" onClick={() => setOpen((v) => !v)}>
@@ -94,7 +86,7 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
           </div>
           <div className="row" style={{ marginTop: 14 }}>
             <button className="btn" disabled={busy || Object.keys(values).length === 0} onClick={() => void save()}>
-              Salvar e testar
+              Salvar
             </button>
             <small style={{ color: 'var(--muted)' }}>
               Campo em branco mantém o valor já salvo. Tudo é gravado criptografado.
@@ -108,90 +100,27 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
 
 export function Conexoes() {
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
-  const [wa, setWa] = useState<WaStatus | null>(null);
 
   const loadPlatforms = () => api.get<PlatformInfo[]>('/api/platforms').then(setPlatforms).catch(() => {});
-  const loadWa = () => api.get<WaStatus>('/api/whatsapp/status').then(setWa).catch(() => {});
 
   useEffect(() => {
     void loadPlatforms();
-    void loadWa();
-    // Enquanto o QR está na tela, ele expira em segundos e precisa ser renovado.
-    const timer = setInterval(() => void loadWa(), 4000);
-    return () => clearInterval(timer);
   }, []);
 
   return (
     <>
       <div className="head">
         <div>
-          <h1>Conexões</h1>
-          <p>Credenciais ficam criptografadas no banco com a MASTER_KEY. Perdeu a chave, perdeu as credenciais.</p>
+          <h1>Plataformas</h1>
+          <p>Suas contas de afiliado, pra gerar links com a sua tag.</p>
         </div>
       </div>
 
-      <div className="notice">
-        O envio usa uma biblioteca não oficial do WhatsApp. Pareie um <strong>chip secundário</strong>: o número
-        pode ser banido, e o banimento costuma ser definitivo.
-      </div>
-
-      <div className="panel">
-        <h2 className="panel__title">WhatsApp</h2>
-
-        {wa?.status === 'connected' ? (
-          <>
-            <p style={{ marginTop: 0 }}>
-              Conectado como <strong>{wa.me?.split(':')[0]}</strong>. Enviadas hoje: {wa.quota.used} de{' '}
-              {wa.quota.cap}.
-            </p>
-
-            <div className="field" style={{ maxWidth: 380 }}>
-              <label htmlFor="group">Grupo que recebe as ofertas</label>
-              <select
-                id="group"
-                value={wa.groups.find((g) => g.isDefault)?.jid ?? ''}
-                onChange={async (e) => {
-                  await api.post('/api/whatsapp/default-group', { jid: e.target.value });
-                  void loadWa();
-                }}
-              >
-                <option value="">Escolha um grupo</option>
-                {wa.groups.map((g) => (
-                  <option key={g.jid} value={g.jid}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="row" style={{ marginTop: 14 }}>
-              <button className="btn btn--ghost" onClick={async () => { await api.post('/api/whatsapp/sync-groups'); void loadWa(); }}>
-                Atualizar grupos
-              </button>
-              <button className="btn btn--ghost" onClick={async () => { await api.post('/api/whatsapp/logout'); void loadWa(); }}>
-                Desconectar
-              </button>
-            </div>
-          </>
-        ) : wa?.qr ? (
-          <div style={{ display: 'flex', gap: 22, alignItems: 'center', flexWrap: 'wrap' }}>
-            <img src={wa.qr} alt="QR code para parear o WhatsApp" width={200} height={200} style={{ borderRadius: 3 }} />
-            <ol style={{ margin: 0, paddingLeft: 18, fontSize: 14, lineHeight: 1.8 }}>
-              <li>Abra o WhatsApp no chip secundário</li>
-              <li>Aparelhos conectados → Conectar aparelho</li>
-              <li>Aponte para este código</li>
-            </ol>
-          </div>
-        ) : (
-          <div className="row">
-            <button className="btn" onClick={async () => { await api.post('/api/whatsapp/connect'); void loadWa(); }}>
-              {wa?.status === 'connecting' ? 'Conectando...' : 'Parear número'}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {platforms.map((p) => (
-        <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
-      ))}
+      {[...platforms]
+        .sort((a, b) => Number(b.connected) - Number(a.connected))
+        .map((p) => (
+          <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
+        ))}
     </>
   );
 }

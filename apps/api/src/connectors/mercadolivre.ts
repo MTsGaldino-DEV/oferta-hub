@@ -1,6 +1,7 @@
 import { Platform } from '@prisma/client';
 import { request } from '../lib/http.js';
 import { loadCredentials, patchCredentials } from './credentials.js';
+import { exigeKeyword } from './types.js';
 import type { Connector, NormalizedProduct } from './types.js';
 
 /**
@@ -67,8 +68,13 @@ export const mercadoLivre: Connector = {
     { name: 'affiliateTag', label: 'Tag de afiliado', secret: false, help: 'Seu identificador no programa' },
   ],
 
-  matches: (url) => /mercadolivre\.com\.br|mercadolibre\.com|produto\.mercadolivre/i.test(url),
+  // meli.la e o encurtador do proprio programa de afiliados do ML.
+  matches: (url) => /mercadolivre\.com\.br|mercadolibre\.com|produto\.mercadolivre|meli\.la/i.test(url),
 
+  /**
+   * Aceita tanto URL quanto o HTML de uma pagina: o link meli.la cai numa
+   * pagina "social" cujo endereco nao tem o codigo -- ele so aparece no corpo.
+   */
   parseId(url) {
     const m = url.match(/(MLB)-?(\d{6,})/i);
     return m ? `${m[1].toUpperCase()}${m[2]}` : null;
@@ -80,7 +86,8 @@ export const mercadoLivre: Connector = {
   },
 
   async search({ keyword, maxPrice, limit = 20 }) {
-    const params = new URLSearchParams({ q: keyword, limit: String(limit) });
+    const termo = exigeKeyword(keyword, 'Mercado Livre');
+    const params = new URLSearchParams({ q: termo, limit: String(limit) });
     if (maxPrice) params.set('price', `*-${maxPrice}`);
     const data = await api<any>(`/sites/${SITE}/search?${params}`);
     return (data.results ?? []).map(normalize);

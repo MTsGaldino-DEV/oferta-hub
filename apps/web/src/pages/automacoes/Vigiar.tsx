@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, brl, STORE } from '../api.js';
-import { Sparkline } from '../components/Sparkline.js';
+import { api, brl, int, STORE } from '../../api.js';
+import { Sparkline } from '../../components/Sparkline.js';
 
 interface Watch {
   id: string;
@@ -13,25 +13,40 @@ interface Watch {
 }
 
 interface Rule {
-  id: string; platform: string; keyword: string;
+  id: string; platform: string; keyword: string | null;
+  categoryId: number | null; nicheId: string | null; nicho: string | null;
   maxPrice: number | null; minDiscount: number; minCommission: number; lastRunAt: string | null;
 }
 
-export function Produtos() {
+/** Recorte curado de varias categorias. Semeado pelo backend por enquanto. */
+interface NichoCurado {
+  id: string; name: string; minSales: number; entries: { categoryId: number }[];
+}
+
+export function Vigiar() {
   const [items, setItems] = useState<Watch[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [url, setUrl] = useState('');
   const [target, setTarget] = useState('');
   const [drop, setDrop] = useState('10');
   const [keyword, setKeyword] = useState('');
-  const [platform, setPlatform] = useState('MERCADO_LIVRE');
+  // Shopee e a unica que ainda garimpa: o ML bloqueou a busca por palavra.
+  const [platform, setPlatform] = useState('SHOPEE');
   const [minDiscount, setMinDiscount] = useState('25');
+  const [nicheId, setNicheId] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [nichos, setNichos] = useState<NichoCurado[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [jobMsg, setJobMsg] = useState<string | null>(null);
+  const [jobBusy, setJobBusy] = useState(false);
+
+  const nichoAtual = nichos.find((n) => n.id === nicheId);
 
   async function load() {
     setItems(await api.get<Watch[]>('/api/watch'));
     setRules(await api.get<Rule[]>('/api/discovery'));
+    setNichos(await api.get<NichoCurado[]>('/api/nichos'));
   }
 
   useEffect(() => {
@@ -63,10 +78,14 @@ export function Produtos() {
     try {
       await api.post('/api/discovery', {
         platform,
-        keyword: keyword.trim(),
+        nicheId: nicheId || undefined,
+        keyword: keyword.trim() || undefined,
         minDiscount: Number(minDiscount),
+        maxPrice: maxPrice ? Number(maxPrice) : undefined,
       });
       setKeyword('');
+      setNicheId('');
+      setMaxPrice('');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não consegui criar a regra.');
@@ -75,22 +94,79 @@ export function Produtos() {
     }
   }
 
+  /** O clique precisa dizer o que aconteceu, inclusive quando o resultado e zero. */
+  async function rodarMonitor() {
+    setJobBusy(true);
+    setJobMsg(null);
+    try {
+      const r = await api.post<{ checked: number; fired: number; failed: number }>('/api/jobs/price-monitor');
+      if (r.checked === 0) {
+        setJobMsg('Monitor rodou, mas não há nenhum produto vigiado ainda. Adicione um abaixo.');
+      } else {
+        const partes = [`${r.checked} produto(s) conferido(s)`];
+        partes.push(r.fired > 0 ? `${r.fired} caíram de preço e foram pra fila` : 'nenhuma queda no gatilho');
+        if (r.failed > 0) partes.push(`${r.failed} falharam`);
+        setJobMsg(`Monitor: ${partes.join(', ')}.`);
+      }
+      await load();
+    } catch (err) {
+      setJobMsg(err instanceof Error ? err.message : 'O monitor falhou.');
+    } finally {
+      setJobBusy(false);
+    }
+  }
+
+  async function rodarGarimpo() {
+    setJobBusy(true);
+    setJobMsg(null);
+    try {
+      const r = await api.post<{ rules: { keyword: string; platform: string; found: number; added: number; error?: string }[] }>(
+        '/api/jobs/discovery',
+      );
+      if (r.rules.length === 0) {
+        setJobMsg('Garimpo rodou, mas não há nenhuma regra ativa. Crie uma abaixo.');
+      } else {
+        setJobMsg(
+          r.rules
+            .map((x) => {
+              const onde = `${STORE[x.platform] ?? x.platform} · "${x.keyword}"`;
+              if (x.error) return `${onde}: falhou — ${x.error}`;
+              if (x.added > 0) return `${onde}: ${x.added} de ${x.found} entraram na fila`;
+              return `${onde}: ${x.found} encontrados, nenhum passou nos filtros`;
+            })
+            .join(' | '),
+        );
+      }
+      await load();
+    } catch (err) {
+      setJobMsg(err instanceof Error ? err.message : 'O garimpo falhou.');
+    } finally {
+      setJobBusy(false);
+    }
+  }
+
   return (
     <>
       <div className="head">
         <div>
-          <h1>Preços vigiados</h1>
+          <h1>Vigiar</h1>
           <p>
             O monitor lê o preço de hora em hora e guarda o histórico. Quando bate seu gatilho, a oferta vai
             direto pra fila — nunca direto pro grupo.
           </p>
         </div>
-        <button className="btn btn--ghost" onClick={() => void api.post('/api/jobs/price-monitor')}>
-          Rodar monitor agora
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn--ghost" disabled={jobBusy} onClick={() => void rodarMonitor()}>
+            {jobBusy ? 'Rodando...' : 'Rodar monitor agora'}
+          </button>
+          <button className="btn btn--ghost" disabled={jobBusy} onClick={() => void rodarGarimpo()}>
+            {jobBusy ? 'Rodando...' : 'Rodar garimpo agora'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="notice">{error}</div>}
+      {jobMsg && <div className="notice">{jobMsg}</div>}
 
       <div className="panel">
         <h2 className="panel__title">Vigiar um produto</h2>
@@ -126,15 +202,40 @@ export function Produtos() {
             </select>
           </div>
           <div className="field" style={{ flex: '2 1 260px' }}>
-            <label htmlFor="kw">Palavra-chave</label>
-            <input id="kw" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="fone bluetooth" />
+            <label htmlFor="nicho">Nicho</label>
+            <select id="nicho" value={nicheId} onChange={(e) => setNicheId(e.target.value)}>
+              <option value="">— escolha um nicho —</option>
+              {nichos.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                </option>
+              ))}
+            </select>
+            <small>
+              {nichoAtual
+                ? `${nichoAtual.entries.length} categorias, mín. ${int(nichoAtual.minSales)} vendas`
+                : 'edição manual de nichos volta em breve'}
+            </small>
           </div>
-          <div className="field" style={{ flex: '0 1 150px' }}>
-            <label htmlFor="mind">Desconto mínimo</label>
+          <div className="field" style={{ flex: '1 1 180px' }}>
+            <label htmlFor="kw">Refinar (opcional)</label>
+            <input id="kw" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="deixe vazio p/ nicho todo" />
+          </div>
+          <div className="field" style={{ flex: '0 1 130px' }}>
+            <label htmlFor="mind">Desconto mín.</label>
             <input id="mind" value={minDiscount} onChange={(e) => setMinDiscount(e.target.value)} inputMode="numeric" />
             <small>em %</small>
           </div>
-          <button className="btn" disabled={keyword.trim().length < 2 || busy} onClick={() => void addRule()}>
+          <div className="field" style={{ flex: '0 1 130px' }}>
+            <label htmlFor="maxp">Preço até</label>
+            <input id="maxp" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} inputMode="numeric" placeholder="R$" />
+            <small>opcional</small>
+          </div>
+          <button
+            className="btn"
+            disabled={busy || (!nicheId && keyword.trim().length < 2)}
+            onClick={() => void addRule()}
+          >
             Criar regra
           </button>
         </div>
@@ -143,7 +244,7 @@ export function Produtos() {
           <table className="table" style={{ marginTop: 16 }}>
             <thead>
               <tr>
-                <th>Palavra-chave</th>
+                <th>Nicho / palavra</th>
                 <th>Loja</th>
                 <th className="num">Desconto mín.</th>
                 <th className="num">Última varredura</th>
@@ -153,7 +254,10 @@ export function Produtos() {
             <tbody>
               {rules.map((r) => (
                 <tr key={r.id}>
-                  <td><strong>{r.keyword}</strong></td>
+                  <td>
+                    <strong>{r.nicho ?? r.keyword}</strong>
+                    {r.nicho && r.keyword && <small style={{ display: 'block' }}>refinado por "{r.keyword}"</small>}
+                  </td>
                   <td>{STORE[r.platform]}</td>
                   <td className="num">{r.minDiscount}%</td>
                   <td className="num">

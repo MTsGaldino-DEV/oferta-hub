@@ -1,0 +1,18 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.gitignore
+*.log
+
+# Segredos e estado: entram em runtime (env_file / volume), nunca na imagem.
+.env
+.env.ml
+apps/api/.env
+apps/api/auth_state
+
+# Docs e utilitarios que nao afetam o build
+README.md
+contexto-geral.md
+scripts

@@ -1,14 +1,8 @@
-import { NavLink, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../api.js';
-
-const LINKS = [
-  { to: '/', label: 'Fila', end: true },
-  { to: '/desempenho', label: 'Desempenho' },
-  { to: '/produtos', label: 'Preços vigiados' },
-  { to: '/agenda', label: 'Agenda' },
-  { to: '/conexoes', label: 'Conexões' },
-];
+import { AppSidebar } from './app-sidebar.js';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from './ui/sidebar.js';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [pending, setPending] = useState(0);
@@ -20,47 +14,27 @@ export function Layout({ children }: { children: React.ReactNode }) {
     api.get<any>('/api/whatsapp/status').then(setWa).catch(() => {});
   }, [location.pathname]);
 
-  const online = wa?.status === 'connected';
+  async function logout() {
+    // redireciona mesmo se a chamada falhar -- logout local e o que importa
+    try {
+      await api.post('/api/logout');
+    } finally {
+      window.location.href = '/';
+    }
+  }
 
   return (
-    <div className="shell">
-      <aside className="rail">
-        <div className="rail__mark">
-          Oferta<span>Hub</span>
-        </div>
-
-        <nav className="rail__nav">
-          {LINKS.map((l) => (
-            <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
-              {l.label}
-              {l.to === '/' && pending > 0 && <span className="rail__count">{pending}</span>}
-            </NavLink>
-          ))}
-        </nav>
-
-        <div className="rail__foot">
-          <div>
-            WhatsApp: <strong style={{ color: online ? 'var(--tag)' : '#fff' }}>{online ? 'conectado' : 'offline'}</strong>
-          </div>
-          {wa && (
-            <div>
-              Envios hoje: {wa.quota.used}/{wa.quota.cap}
-            </div>
-          )}
-          <button
-            className="btn btn--ghost btn--sm"
-            style={{ borderColor: 'rgba(255,255,255,.25)', color: '#fff', width: 'fit-content' }}
-            onClick={async () => {
-              await api.post('/api/logout');
-              window.location.href = '/';
-            }}
-          >
-            Sair
-          </button>
-        </div>
-      </aside>
-
-      <main className="main">{children}</main>
-    </div>
+    <SidebarProvider style={{ '--sidebar-width': '13rem' } as React.CSSProperties}>
+      <AppSidebar
+        pending={pending}
+        online={wa?.status === 'connected'}
+        quota={wa?.quota ?? null}
+        onLogout={() => void logout()}
+      />
+      <SidebarInset className="main">
+        <SidebarTrigger className="mb-3" />
+        {children}
+      </SidebarInset>
+    </SidebarProvider>
   );
 }

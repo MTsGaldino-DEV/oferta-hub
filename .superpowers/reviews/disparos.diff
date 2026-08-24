@@ -1,0 +1,3523 @@
+914a221 feat(disparos): disparo manual em massa (ofertas x grupos, espacado)
+dc9d556 docs: ledger da noite
+---
+ .superpowers/dark-mode-report.md      | 145 +++++++
+ .superpowers/disparos-report.md       | 168 ++++++++
+ .superpowers/fila-filtro-report.md    |  98 +++++
+ .superpowers/overnight-progress.md    | 127 ++++--
+ .superpowers/reviews/dark-mode.diff   | 226 +++++++++++
+ .superpowers/reviews/fila-filtro.diff | 173 ++++++++
+ .superpowers/reviews/templates.diff   | 723 ++++++++++++++++++++++++++++++++++
+ .superpowers/reviews/visao-geral.diff | 196 +++++++++
+ .superpowers/visao-geral-report.md    |  42 ++
+ apps/api/prisma/schema.prisma         |  77 +++-
+ apps/api/src/routes/disparos.ts       | 106 +++++
+ apps/api/src/routes/extensao.ts       |   6 +-
+ apps/api/src/server.ts                |   2 +
+ apps/api/src/services/disparo.ts      | 270 +++++++++++++
+ apps/api/src/services/dispatch.ts     |  29 +-
+ apps/api/src/workers/index.ts         |   9 +-
+ apps/web/src/App.tsx                  |   2 +
+ apps/web/src/components/Layout.tsx    |   1 +
+ apps/web/src/pages/Disparos.tsx       | 586 +++++++++++++++++++++++++++
+ apps/web/src/styles.css               |  73 ++++
+ 20 files changed, 3029 insertions(+), 30 deletions(-)
+---
+diff --git a/.superpowers/dark-mode-report.md b/.superpowers/dark-mode-report.md
+new file mode 100644
+index 0000000..f8494e7
+--- /dev/null
++++ b/.superpowers/dark-mode-report.md
+@@ -0,0 +1,145 @@
++# Dark mode implementation report
++
++## What was implemented
++
++1. **`apps/web/src/styles.css`** — added a `[data-theme='dark']` override block
++   right after `:root` (same file position/pattern as the light tokens), plus a
++   final "ajustes pontuais" section at end of file for component-specific
++   overrides that the plain token flip breaks.
++
++2. **`apps/web/src/theme.ts`** (new) — `getTheme()` / `setTheme()` /
++   `applyStoredTheme()`, exactly per spec: localStorage key `hub-theme`,
++   `document.documentElement.dataset.theme` set to `'dark'` or `''`.
++
++3. **`apps/web/src/main.tsx`** — `applyStoredTheme()` called synchronously
++   before `ReactDOM.createRoot(...).render(...)`, so theme is set before first
++   paint (no flash).
++
++4. **`apps/web/src/pages/Conexoes.tsx`** — new `AparenciaCard` component
++   rendered as a `.panel` between the WhatsApp panel and `<ExtensaoCard />`.
++   Single ghost button, label "Modo escuro" / "Modo claro" depending on
++   current state, calls `setTheme()` and mirrors it into local `useState`
++   (initialized from `getTheme()`) to re-render.
++
++## Dark token values chosen
++
++| Token | Light | Dark | Why |
++|---|---|---|---|
++| `--ink` | `#16171a` | `#f2f2f0` | near-white text, per spec |
++| `--canvas` | `#e8e9eb` | `#1c1d20` | dark charcoal, close to old `--ink`, per spec |
++| `--surface` | `#ffffff` | `#232427` | one step lighter than canvas for card separation |
++| `--muted` | `#74787f` | `#9a9da3` | mid-gray, legible on `--surface`/`--canvas` |
++| `--line` | `#d8dadd` | `#34353a` | solid hex (not alpha-white) to match the flat/hard-edge motif already used for `--surface`/`--canvas` |
++| `--drop` | `#d93a1e` | `#ff6b52` | brightened; old value read muddy on dark |
++| `--gain` | `#0c7c4a` | `#22a866` | brightened; old value read muddy on dark |
++| `--shadow` | dark-on-light rgba | `rgba(0,0,0,.4)/(.5)` alpha-black | kept subtle depth cue; not dropped to `none` since `--surface` is lighter than `--canvas` so a dark halo still reads |
++
++`--brand`, `--tag`, `--display`, `--mono`, `--r` untouched, as required.
++
++## Component-specific overrides (beyond the token flip)
++
++Found by grepping every `var(--ink)`, `var(--drop)`, `var(--gain)` usage
++across `styles.css` and the three other files that reference these tokens
++(`Sparkline.tsx`, `Desempenho.tsx`, `Nichos.tsx` — those three only use the
++tokens as plain foreground stroke/text color on a surface/canvas backdrop,
++so the flip alone is safe there, no changes made).
++
++Two real breakage classes found in `styles.css`:
++
++**A. `--ink` used as a fixed dark BACKGROUND, paired with hardcoded `#fff` or
++`var(--brand)` foreground.** Once `--ink` flips to near-white for dark mode,
++these backgrounds go near-white while their foreground stays exactly what it
++was designed to contrast against a *dark* chip — i.e. white-on-white /
++brand-yellow-on-near-white. Pinned each to the original dark tone so they
++render identically in both themes:
++- `.rail` (sidebar) — background pinned to `#16171a`. Confirms the task's own
++  note that the rail is deliberately dark in both themes already.
++- `.login__mark` — background pinned to `#16171a` (comment in the source
++  literally explains this element exists *because* yellow-on-white has no
++  contrast — flipping `--ink` here would have silently reintroduced that
++  exact bug in dark mode).
++- `.btn` (primary button) — background/border repinned to `#3a3b40` (a
++  visible-but-not-canvas-matching chip), scoped with
++  `:not(.btn--ghost):not(.btn--tag)` so it doesn't clobber those two
++  variants, which already have their own background rules later in the
++  cascade.
++- `.tabs__item[data-on='true']` (active niche tab) — same treatment,
++  `#3a3b40`.
++
++**B. `--ink` used as foreground TEXT on `var(--brand)`/`var(--tag)`
++(unchanged bright yellow) background.** Once `--ink` flips to near-white,
++these become near-white text on bright yellow — poor contrast. Pinned
++`color` to `#16171a` (the original ink) for all six instances:
++`.rail__count`, `.btn--tag`, `.tag__score`, `.tabs__item[data-on='true'] span`,
++`.card__selo`, `.card__nicho`.
++
++**C. Two hardcoded (non-token) light-mode colors that also broke:**
++- `.empty` had `background: rgba(255,255,255,.5)` (hardcoded, not a token).
++  In dark mode this washes out to a light blob on the dark canvas, and
++  `.empty strong` (`color: var(--ink)`, now near-white) becomes nearly
++  invisible against it. Overrode the background to `rgba(255,255,255,.04)`
++  for dark mode so both the near-white heading and the mid-gray `--muted`
++  body text stay legible.
++- `.card__well` (product photo backdrop) is intentionally kept light in both
++  themes (neutral background for store photos, most of which have white
++  backgrounds) — that part is fine and untouched. But `.card__semfoto`
++  ("sem foto" placeholder text) used `color: var(--muted)`, which flips to a
++  *light* gray in dark mode while still sitting on that same hardcoded-light
++  well (`#f4f5f6`) — light-on-light. Pinned `.card__semfoto` color to the
++  original light-mode muted value `#74787f`.
++
++## Typecheck / build result
++
++`npm run build --workspace=apps/web` → **exit 0**. `tsc -b` passed with no
++errors, `vite build` completed (17.00 kB CSS, 223.91 kB JS bundle, no
++warnings beyond normal chunk size info).
++
++## Self-review findings
++
++- Verified selector specificity for every override that competes with an
++  existing rule for the same property: all `[data-theme='dark'] .foo`
++  overrides have strictly higher specificity than the light-mode rule they
++  replace (attribute selector adds a class-level specificity point), so the
++  cascade doesn't depend on source order — confirmed each one by hand.
++- Confirmed `.btn:not(.btn--ghost):not(.btn--tag)` doesn't accidentally beat
++  `.btn--ghost` / `.btn--tag`'s own background rules for elements carrying
++  both classes (e.g. `className="btn btn--ghost"` on ~10 buttons across the
++  app) — the `:not()` exclusion means the dark override selector simply
++  never matches those elements, no specificity race needed.
++- Left three purely cosmetic (non-breaking) spots untouched, noted here
++  rather than "fixed" to avoid over-engineering:
++  - `.tag:hover` / `.card:hover` box-shadow (hardcoded `rgba(22,23,26,…)`) —
++    barely visible on a dark background, but it's a hover embellishment, not
++    a legibility issue.
++  - `.catbox__item:hover` background (`rgba(22,23,26,.04)`) — same, subtle
++    hover affordance gets weaker in dark mode, not broken.
++  - `.tag::before` perforation texture (`repeating-linear-gradient` with
++    `rgba(22,23,26,.055)`) — decorative dashed-edge dots, near-invisible in
++    dark mode but purely decorative.
++  - `.card__ganho` background tint (`rgba(12,124,74,.09)`, the *old*
++    light-mode `--gain` RGB) — text color already uses the new brighter
++    `var(--gain)`, so contrast is fine; the tint itself is just a slightly
++    different hue than a "correct" dark-mode green tint would be. Cosmetic
++    mismatch only.
++- Did not find any other `--ink`/`--drop`/`--gain` usage (in `styles.css` or
++  the three `.tsx` files that reference these tokens directly) that breaks
++  under the flip beyond what's listed above.
++
++## Files changed
++
++- `apps/web/src/styles.css`
++- `apps/web/src/theme.ts` (new)
++- `apps/web/src/main.tsx`
++- `apps/web/src/pages/Conexoes.tsx`
++
++## Concerns
++
++None blocking. Minor judgment calls made without re-confirming with the
++owner (all within the "you may need a dark-specific override" latitude
++granted by the task):
++- Picked `#3a3b40` for the primary-button / active-tab dark chip color; not
++  specified in the design doc, chosen to be clearly visible against
++  `--canvas`/`--surface` while keeping the existing white-text-on-dark-chip
++  look intact.
++- `--shadow` kept as a visible (if subtle) dark halo rather than `none`,
++  since `--surface` panels sit lighter than `--canvas`.
+diff --git a/.superpowers/disparos-report.md b/.superpowers/disparos-report.md
+new file mode 100644
+index 0000000..f5b774d
+--- /dev/null
++++ b/.superpowers/disparos-report.md
+@@ -0,0 +1,168 @@
++# Disparos — relatório de implementação
++
++## O que foi construído
++
++**Schema** (`apps/api/prisma/schema.prisma`)
++- `OfferStatus` ganhou `DISPATCHING` (reservada por um Disparo, fora da fila até terminar/cancelar).
++- Dois modelos novos: `Disparo` (status `DisparoStatus`: DRAFT/SENDING/DONE/CANCELLED; grupos alvo; template; `startAt`; `intervalMinutes`; três guardas: `avoidNightHours`, `avoidWeekends`, `skipExpiredOffers`) e `DisparoItem` (par oferta×grupo; status `DisparoItemStatus`: PENDING/SENT/FAILED; `scheduledFor`/`sentAt`/`failReason`; índices `[status, scheduledFor]` e `[disparoId]`).
++- Back-relations obrigatórias do Prisma: `Offer.disparoItems` e `MessageTemplate.disparos`.
++- `npx prisma generate` rodado com sucesso (client regenerado, **nenhuma conexão ao banco**).
++
++**Serviço** `apps/api/src/services/disparo.ts`
++- `criarDisparo`: valida que todas as ofertas ainda estão `PENDING` e o template existe; monta os pares (oferta × grupo) na ordem "para cada oferta, todos os grupos"; cria o `Disparo` + `DisparoItem`s e already reserva as ofertas (`PENDING` → `DISPATCHING`) numa única transação.
++- `cancelarDisparo`: marca itens `PENDING` como `FAILED` ("Disparo cancelado."), devolve à `PENDING` só as ofertas que ainda estavam `DISPATCHING`, marca o disparo `CANCELLED`.
++- `runDisparos`: worker chamado pelo cron a cada minuto — ver seção própria abaixo.
++- Guarda de horário (`bloqueado`) e adiamento (`proximoLiberado`, `adiar`) — ver seção de adiamento.
++
++**Rotas** `apps/api/src/routes/disparos.ts`, registradas no bloco autenticado de `server.ts`
++- `POST /api/disparos` — cria (Zod valida `intervalMinutes >= 5`, listas não vazias, `startNow` ou `scheduledFor`).
++- `GET /api/disparos` — lista com progresso calculado (total/enviados/falharam/pendentes/estimativa de término).
++- `GET /api/disparos/:id` — um disparo com todos os itens (oferta, grupo, status, horário).
++- `POST /api/disparos/:id/cancelar`.
++
++**Worker** — `apps/api/src/workers/index.ts` ganhou `cron.schedule('*/1 * * * *', () => void runDisparos(), ...)`, no mesmo ritmo do agendador existente.
++
++**Frontend** `apps/web/src/pages/Disparos.tsx`, roteado em `/disparos`, no grupo "Automação" do nav (ao lado de Automações).
++- Duas abas: "Novo disparo" (wizard de 3 passos com indicador visual) e "Em andamento".
++- Passo 1 (Ofertas): lista `PENDING` da Fila, todas marcadas por padrão, contador, marcar/desmarcar todas.
++- Passo 2 (Mensagem): escolha de template **obrigatória, sem pré-seleção** (não usa `isDefault`), pré-visualização via `POST /api/templates/preview` (reaproveitado, sem duplicar lógica de render no browser).
++- Passo 3 (Destinos): grupos multi-select (nenhum marcado por padrão), Agora/Agendar, intervalo (mínimo e padrão 5), as três guardas, resumo "N ofertas × M grupos = X envios" + previsão de término.
++- "Em andamento": status, grupos, barra de progresso, "X/Y envios · Z%", previsão de término, botão Cancelar com `confirm()` (mesmo padrão do "Limpar fila" da Fila), clique no card expande a lista de itens (usa o `GET /:id`).
++- CSS novo em `apps/web/src/styles.css`: `.steps`/`.steps__*` (indicador de passos) e `.progress`/`.progress__bar` (barra de progresso) — nenhum equivalente existia. Ajuste de modo escuro espelhando o padrão já usado em `.btn`/`.tabs__item` (fundo preso em tom escuro fixo, porque `--ink` vira texto claro no dark).
++
++## Conflito do `sendOffer` já-SENT em multi-grupo — solução
++
++`sendOffer(offerId, groupJid)` bloqueava qualquer reenvio de oferta `SENT`. Um disparo manda a MESMA oferta pra vários grupos em sequência — o primeiro envio já marca `SENT`, então o segundo grupo bateria nesse guard.
++
++**Solução**: acrescentei um terceiro parâmetro opcional `options?: { message?: string; allowResend?: boolean }` a `sendOffer`. O guard virou `if (offer.status === SENT && !options?.allowResend) throw ...`. O worker de Disparos é o único chamador que passa `allowResend: true`. `message` sobrepõe o texto enviado ao WhatsApp sem tocar no campo `Offer.message` gravado (que continua sendo o texto do fluxo manual da Fila) — é o texto renderizado pelo template do disparo, com CTA sorteada por item.
++
++**Por que não quebra o fluxo manual**: o botão "Enviar ao grupo" da Fila (`routes/offers.ts`) e o agendador (`runScheduler`) continuam chamando `sendOffer(id, groupJid)` com dois argumentos — `options` fica `undefined`, `allowResend` fica falsy, o guard se comporta exatamente como antes. `executarRodada` (Automações) também não muda. É uma mudança puramente aditiva.
++
++**Efeito colateral aceito**: depois do segundo envio (2º grupo), `Offer.groupJid`/`sentAt` passam a refletir o *último* grupo enviado, não uma lista — é um comportamento pré-existente do campo (ele sempre foi singular). O histórico por grupo de verdade mora no `DisparoItem` (que tem seu próprio `groupJid`/`sentAt`/`status`), que é a fonte de verdade pra progresso do disparo. Não achei necessidade de dar a `Offer` um histórico multi-grupo — seria escopo não pedido.
++
++## `OfferStatus.` — toda ocorrência conferida, e o que mudou
++
++Grep por `OfferStatus\.` (mais o literal `'PENDING'|'QUEUED'` da extensão, que não usa o enum importado) cobriu:
++
++| Local | Uso | DISPATCHING vaza? | Ação |
++|---|---|---|---|
++| `workers/index.ts:184` `runScheduler` | `where status=QUEUED` | Não — `DISPATCHING ≠ QUEUED`, exatamente a garantia pedida | nenhuma |
++| `workers/index.ts:151` `runDiscovery` (dedup por produto) | `OR: [{status in [PENDING,QUEUED]}, {sentAt recente}]` | Sim, por omissão — um produto em disparo (ainda não enviado) não bloqueava recaptura, criando oferta duplicada pro mesmo produto no meio de um disparo | **adicionei `DISPATCHING` na lista `in`** |
++| `routes/extensao.ts:122` (dedup da extensão) | mesma lógica, literais `'PENDING'`/`'QUEUED'` | Mesmo caso do garimpo, mesma causa | **adicionei `'DISPATCHING'`** |
++| `routes/offers.ts` (GET /api/offers, todas as variações) | filtro por `status` explícito (default `PENDING`) | Não — não é filtro "não-X", é `status === PENDING` literal | nenhuma |
++| `routes/offers.ts:145` limpar-duplicados | `where status=PENDING` | Não — exclusão correta, uma oferta em disparo não deveria ser recolapsada por dedup manual | nenhuma |
++| `routes/offers.ts:188` limpar-fila | `where status=PENDING (+nicheId)` | Não — é exatamente por isso que `DISPATCHING` precisa ser distinto de `PENDING`: "Limpar fila" não pode arrastar oferta comprometida com um disparo em andamento | nenhuma |
++| `routes/offers.ts:301` `/schedule` | seta status arbitrário pra `QUEUED` por id | Risco teórico pré-existente (endpoint aceita qualquer id, sem checar status atual) — mas a Agenda só lista ofertas `PENDING`, então não é alcançável pelo fluxo normal; não é uma regressão introduzida agora | nenhuma (fora de escopo) |
++| `services/dispatch.ts:22` `sendOffer` guard | `status === SENT` | É o ponto que resolvi acima, não é "vazamento" | ver seção anterior |
++| `services/automacoes.ts:56` elegibilidade de automação | `where status=PENDING` | Não — e é um efeito **desejado**: uma oferta reservada por disparo não pode ser pega por uma automação ao mesmo tempo | nenhuma (funciona certo de graça) |
++| `services/automacoes.ts:50`, `routes/offers.ts:129`, `routes/stats.ts` (todas), `services/scoring.ts:97` | todos filtram só por `SENT` | Não | nenhuma |
++
++Resumo: só as duas rotinas de **deduplicação por produto** (garimpo automático e captura da extensão) precisavam enxergar `DISPATCHING` como "já ativo" — ambas corrigidas. Todo o resto ou já filtra por um status exato que não é `DISPATCHING`, ou se beneficia automaticamente de `DISPATCHING` ser diferente de `PENDING`.
++
++## Semântica de adiamento (guarda de horário) — por que não vira rajada
++
++Quando o worker acha um item vencido mas o instante atual cai numa janela bloqueada (23h–06h e/ou fim de semana, conforme os toggles do disparo), ele **desliza a cauda inteira**, não só o item: busca todos os `DisparoItem` `PENDING` daquele disparo com `scheduledFor >= ` o do item atual (ou seja, ele mesmo e todo o resto que ainda não foi enviado), acha o próximo instante livre andando minuto a minuto (`proximoLiberado`), e reatribui `scheduledFor = proximoLivre + i·intervalo` pra cada um, preservando o espaçamento configurado.
++
++A alternativa óbvia — só adiar o item bloqueado pro instante em que a janela reabre e deixar os outros com o horário original — quebra: como a janela bloqueada emperra *todos* os itens da cauda ao mesmo tempo (todos com `scheduledFor` no passado quando o worker olha de novo), no instante em que a janela reabre eles apareceriam **todos vencidos ao mesmo tempo**, e o worker os despacharia um atrás do outro a cada tick de 1 minuto — exatamente a rajada que o intervalo mínimo de 5 minutos existe pra proibir. Deslizando a cauda inteira de uma vez, o espaçamento nunca comprime: ele só se desloca no tempo.
++
++## Reentrância do worker
++
++`runDisparos` usa uma trava booleana em memória de processo (`let rodando`). Sem ela, duas rodadas do cron sobrepostas (só acontece se um envio de um tick anterior ainda não tivesse terminado quando o próximo tick de 1 minuto disparasse) poderiam ler o mesmo `DisparoItem` `PENDING` antes de qualquer uma marcá-lo `SENT`/`FAILED`, e as duas chamariam `sendOffer` pro mesmo par (oferta, grupo) — mensagem duplicada de verdade.
++
++Isso é **mais estrito** que o `runScheduler` existente, que não tem nenhuma trava (documentado no código: `whatsapp.sendOffer` já serializa o envio real por baixo com um lock próprio, então o pior que acontece hoje sem trava é dois ticks brigarem pela mesma oferta QUEUED — preexistente, não mexi). Optei por adicionar a trava no worker novo porque aqui a consequência de uma corrida (mensagem duplicada) é mais visível e mais fácil de acontecer (uma janela de bloqueio reaberta pode deixar vários itens vencidos ao mesmo tempo, aumentando a chance de dois ticks pegarem trabalho sobreposto).
++
++`ponytail`: a trava só funciona com uma instância da API rodando (é o caso hoje — Docker Compose sobe um container só). Com mais de um processo, precisaria de lock no banco (ex.: `SELECT ... FOR UPDATE SKIP LOCKED` ou uma tabela de lock).
++
++## Três hand-traces
++
++### 1) 2 ofertas (A, B) × 2 grupos (G1, G2), intervalo 5 min, "Agora" às 10:00
++
++Ordem de criação: para cada oferta, todos os grupos → A-G1, A-G2, B-G1, B-G2.
++
++| item | par | scheduledFor |
++|---|---|---|
++| 1 | A→G1 | 10:00 |
++| 2 | A→G2 | 10:05 |
++| 3 | B→G1 | 10:10 |
++| 4 | B→G2 | 10:15 |
++
++`disparo.status` nasce `SENDING` (é "Agora"). O worker manda um item por tick conforme cada `scheduledFor` vence — nunca dois no mesmo minuto. Total do lote: 4 envios em 15 minutos (fórmula: `(total-1) × intervalo`), consistente com o exemplo do enunciado (8×2 = 16 envios em ~80 min = 15×5).
++
++### 2) Mesmo lote, item 3 caindo em 23:30 com a guarda de noite ligada
++
++Ajustando só o horário de início pra ilustrar (intervalo 35 min, início 22:20, `avoidNightHours=true`):
++
++| item | par | scheduledFor original | resultado |
++|---|---|---|---|
++| 1 | A→G1 | 22:20 | enviado normalmente (antes das 23h) |
++| 2 | A→G2 | 22:55 | enviado normalmente (antes das 23h) |
++| 3 | B→G1 | **23:30** | **bloqueado** (hora ≥ 23) → `adiar()` |
++| 4 | B→G2 | 00:05 (dia seguinte) | também estava na cauda pendente → recalculado junto |
++
++Quando o worker chega no item 3 e vê que agora (23:30) está na janela bloqueada, ele busca a cauda `PENDING` com `scheduledFor >= 23:30` (itens 3 e 4 — 1 e 2 já são `SENT`, saem do filtro), acha o próximo horário livre (`proximoLiberado` anda minuto a minuto até `06:00` do dia seguinte) e reescreve:
++
++| item | novo scheduledFor |
++|---|---|
++| 3 (B→G1) | **06:00 do dia seguinte** |
++| 4 (B→G2) | **06:35 do dia seguinte** (06:00 + 35 min, intervalo preservado) |
++
++Os itens 1 e 2 continuam `SENT`, intocados. Nenhum item vence "atrasado em lote" às 06:00 — só o 3 vence primeiro, o 4 continua 35 min depois dele.
++
++### 3) Cancelar depois de 1 de 4 itens enviados
++
++Usando o lote do trace 1 (A-G1, A-G2, B-G1, B-G2). Suponha que só o item 1 (A→G1, 10:00) já foi enviado quando o usuário clica em Cancelar; itens 2, 3, 4 seguem `PENDING`.
++
++`cancelarDisparo`:
++1. `pendentes` = itens 2, 3, 4. `offerIds` únicos entre eles = `{A, B}` (A aparece no item 2, B nos itens 3 e 4).
++2. Todos os itens `PENDING` (2, 3, 4) viram `FAILED`, `failReason = "Disparo cancelado."`. Item 1 continua `SENT`, intocado.
++3. `offer.updateMany({ id in [A,B], status: DISPATCHING } -> PENDING)`:
++   - Oferta **A** já está `SENT` (o `sendOffer` do item 1 já a marcou assim) — **não bate** o filtro `status: DISPATCHING`, fica `SENT` (não volta pra Fila).
++   - Oferta **B** nunca foi enviada, ainda está `DISPATCHING` — **bate** o filtro, volta pra `PENDING` (reaparece na Fila).
++4. `disparo.status = CANCELLED`, `cancelledAt = agora`.
++
++**Estado final:**
++- Disparo: `CANCELLED`.
++- Item 1 (A→G1): `SENT` (inalterado).
++- Itens 2, 3, 4: `FAILED`, `failReason = "Disparo cancelado."`.
++- Oferta A: `SENT`, `groupJid = G1`, `sentAt` do envio que já saiu — **não** volta pra Fila.
++- Oferta B: `PENDING` — volta pra Fila, nunca foi enviada.
++
++Esse resultado sai puro do filtro `status: DISPATCHING` na hora de reverter — não precisei nenhuma lógica extra pra distinguir "oferta parcialmente enviada" de "oferta nunca enviada": o próprio `sendOffer` já fez essa distinção ao marcar `SENT` no primeiro envio bem-sucedido.
++
++## Build
++
++```
++npm run build   (raiz)
++  apps/api  tsc -p tsconfig.json           → exit 0
++  apps/web  tsc -b && vite build           → exit 0 (dist gerado, 246 KB JS / 18 KB CSS)
++```
++
++`npx prisma generate` rodado antes, sem erros, sem conexão ao banco.
++
++## Arquivos alterados/criados
++
++Alterados:
++- `apps/api/prisma/schema.prisma`
++- `apps/api/src/services/dispatch.ts`
++- `apps/api/src/workers/index.ts`
++- `apps/api/src/routes/extensao.ts`
++- `apps/api/src/server.ts`
++- `apps/web/src/App.tsx`
++- `apps/web/src/components/Layout.tsx`
++- `apps/web/src/styles.css`
++
++Criados:
++- `apps/api/src/services/disparo.ts`
++- `apps/api/src/routes/disparos.ts`
++- `apps/web/src/pages/Disparos.tsx`
++
++## Autorrevisão — achados e ressalvas
++
++- **Corrida cancelar × worker em processamento**: se o usuário clicar em Cancelar no exato intervalo em que `runDisparos` já leu um item `PENDING` na memória e está no meio de `sendOffer` (que pode levar dezenas de segundos por causa do intervalo mínimo do WhatsApp), a mensagem ainda sai pelo WhatsApp mesmo depois do cancelamento ter marcado o item como `FAILED`/a oferta como `PENDING` — o `update` final do worker sobrescreveria pra `SENT` depois. É uma janela pequena e de baixa probabilidade (exige clique de cancelar bem no segundo em que um tick já está em voo), efeito é só de contabilidade (o item mostraria `SENT` num disparo `CANCELLED`, não uma mensagem inesperada em duplicidade) — não implementei um lock cruzado pra isso; deixo registrado como limitação conhecida.
++- **`/api/offers/:id/schedule` e `/skip` aceitam qualquer id/status** (pré-existente, não é regressão do `DISPATCHING`): tecnicamente dá pra chamar a API crua num id `DISPATCHING` e forçar `QUEUED` ou `SKIPPED`, escapando do controle do disparo. Não é alcançável pela UI (Agenda e Fila só listam `PENDING`), e o mesmo "problema" já existia pra qualquer status antes desta mudança — não mexi.
++- Não toquei em `routes/stats.ts` nem na Visão Geral: ofertas `DISPATCHING` não aparecem no KPI "pendentes" nem em nenhum outro — ficam temporariamente "invisíveis" nos números gerais enquanto o disparo roda. Achei a semântica certa (não estão mais esperando decisão), e não foi pedido um KPI novo pra Disparos.
++- `intervalMinutes` só tem piso (5), sem teto — igual ao padrão do restante do projeto (ex.: `AutomationRule.intervalMinutes` também só tem piso descrito como regra de negócio).
++
++## Schema NÃO aplicado
++
++**A migration não foi aplicada ao banco.** Rodei apenas `npx prisma generate` (regenera o client TypeScript, não conecta no banco). O controller precisa revisar `apps/api/prisma/schema.prisma` e rodar `db:push`/`migrate` conforme o processo do projeto.
+diff --git a/.superpowers/fila-filtro-report.md b/.superpowers/fila-filtro-report.md
+new file mode 100644
+index 0000000..167cf38
+--- /dev/null
++++ b/.superpowers/fila-filtro-report.md
+@@ -0,0 +1,98 @@
++# Filtro por plataforma na Fila — report
++
++## O que foi implementado
++
++Em `apps/web/src/pages/Fila.tsx`:
++
++1. Novo estado `plataforma` (string vazia = "Todos", sem filtro).
++2. `contagemPlataforma`: `Record<string, number>` derivado de `offers` a cada render
++   (`offers.reduce(...)`, chave = `o.product.platform`). `plataformas` é
++   `Object.keys(contagemPlataforma)`.
++3. Tira strip `.tabs` (mesma classe da aba de nicho) renderizada só quando
++   `plataformas.length > 1`, logo abaixo da tira de nicho existente. Chip "Todos"
++   com `offers.length`, um chip por plataforma com `STORE[p] ?? p` e a contagem.
++4. Filtro aplicado na renderização dos cards (ver seção de posição abaixo).
++5. `useEffect` que reresta `plataforma` para `''` quando a plataforma
++   selecionada some da fila carregada (contagem cai a zero).
++
++Nenhuma mudança de backend, nenhuma CSS nova — reaproveitei `.tabs`/`.tabs__item`
++e `STORE` de `api.ts`, como pedido.
++
++## Garantia de que a posição fica correta com filtro ativo
++
++O array completo `offers` é mapeado para pares `{ offer, posicao }` **antes** do
++filtro, com `posicao` vindo do índice no array cheio. O filtro só remove pares
++do array de pares — nunca recalcula `posicao`:
++
++```tsx
++{offers
++  .map((o, i) => ({ offer: o, posicao: i + 1 }))
++  .filter(({ offer }) => !plataforma || offer.product.platform === plataforma)
++  .map(({ offer, posicao }) => (
++    <PriceTag
++      key={offer.id}
++      offer={offer}
++      posicao={posicao}
++      ...
++    />
++  ))}
++```
++
++Tracei à mão: se a oferta #74 (índice 73 no array `offers`) é Shopee, o primeiro
++`.map` gera `{ offer: <oferta#74>, posicao: 74 }` nessa mesma posição do array
++intermediário. O `.filter` subsequente só decide se esse par entra ou sai da
++lista final — ele não reindexa nada, então `posicao` continua `74` no card
++renderizado, mesmo que seja o único item Shopee visível. Confirmado que não há
++nenhum outro `.map`/index usado para `posicao` no arquivo.
++
++## Edge case: plataforma selecionada some da lista
++
++Decisão: resetar automaticamente para "Todos" (`plataforma === ''`) em vez de
++deixar o usuário travado numa grade vazia.
++
++```tsx
++useEffect(() => {
++  if (plataforma && !contagemPlataforma[plataforma]) setPlataforma('');
++  // eslint-disable-next-line react-hooks/exhaustive-deps
++}, [offers]);
++```
++
++Isso cobre os três gatilhos que mudam `offers`: enviar/pular a última oferta
++daquela plataforma (via `retirar`, que atualiza `offers` depois do timeout de
++saída), trocar de aba de nicho (`load(aba)` troca `offers` inteiro), e
++atualizar a fila manualmente. Se a plataforma ainda existir na fila (mesmo que
++com contagem diferente), o filtro permanece selecionado — só reseta quando ela
++de fato desaparece, que é o caso descrito no prompt ("staring at an empty grid
++with no way out").
++
++Também aproveitei que a checagem `offers.length === 0` (estado "Fila vazia")
++já é sobre o array **não filtrado**, então esse empty-state não é acionado
++incorretamente por um filtro de plataforma sem match — o reset acima garante
++que isso nunca fica sem match por muito tempo (roda no mesmo ciclo em que
++`offers` muda).
++
++## Typecheck
++
++`npm run build --workspace=apps/web` → exit 0 (tsc -b + vite build, sem erros).
++
++## Arquivos alterados
++
++- `apps/web/src/pages/Fila.tsx` (único arquivo tocado)
++
++## Self-review
++
++- (a) Posição: verificado acima, `posicao` vem sempre do índice no array
++  `offers` completo, nunca do índice pós-filtro.
++- (b) Reuso: `STORE` importado de `api.ts` (já estava importado antes, não
++  precisei adicionar import novo) usado para os labels dos chips; classe
++  `.tabs`/`.tabs__item` reaproveitada sem CSS novo.
++- (c) Comportamento quando `offers` muda: coberto pelo `useEffect` acima.
++- (d) Sem imports não usados, sem código morto. `contagemPlataforma` e
++  `plataformas` são recalculados a cada render (sem `useMemo`) — deliberado,
++  a fila tem no máximo algumas dezenas de itens, memoizar seria
++  over-engineering pra esse volume.
++
++## Preocupações
++
++Nenhuma. O escopo ficou pequeno e contido ao pedido; não precisei tocar em
++mais nada além do render/estado da própria Fila.tsx.
+diff --git a/.superpowers/overnight-progress.md b/.superpowers/overnight-progress.md
+index 58dca47..460a407 100644
+--- a/.superpowers/overnight-progress.md
++++ b/.superpowers/overnight-progress.md
+@@ -5,45 +5,128 @@ check-ins until done or a hard-stop (irreversible op, security-sensitive
+ action, external side effect, or broken plan). Never touch the live Docker
+ containers, the live Postgres DB, or run `npm run dev`/`dev:api` (Baileys
+ auto-connects to the real WhatsApp account on boot — established earlier
+ this session as off-limits without explicit review).
+ 
+ ## Locked decisions (from brainstorming, do not re-litigate)
+ - Automações stays as-is; Disparos is a new, separate, additive flow.
+ - Visão Geral becomes the new root route "/"; Fila moves to "/fila".
+ - Templates (with rotating CTAs) are NEW and additive — only used by
+   Disparos. Fila's existing message-building/editing is untouched.
+-- Disparos pulls its offers FROM Fila's existing PENDING queue, using the
+-  Offer.status `QUEUED` value that already exists in the schema and is
+-  currently unused.
++- Disparos pulls its offers FROM Fila's existing PENDING queue.
++  *** CORRECTION (found while designing sub-project 5): the earlier note
++  that `QUEUED` was "unused" was WRONG. `QUEUED` is already the Agenda
++  feature's status — `apps/api/src/routes/offers.ts:301` sets
++  `{ status: QUEUED, scheduledFor, groupJid }`, and `runScheduler()`
++  (`apps/api/src/workers/index.ts:182-196`, cron every minute) picks up
++  every `QUEUED` offer whose `scheduledFor <= now` and sends it. If
++  Disparos reused QUEUED, that legacy scheduler would hijack its offers
++  and send them to the default group, bypassing Disparos entirely.
++  DECISION: Disparos gets its own new `OfferStatus` value (`DISPATCHING`).
++  Adding an enum value is additive in Postgres (ALTER TYPE ADD VALUE),
++  non-destructive. User informed. ***
+ - Build order: 1) Dark mode 2) Visão geral 3) Fila platform filter
+   4) Templates + CTA 5) Disparos 6) Meus Grupos 7) Configurações
+   (Conexões folds into it) 8) Garimpar.
+ 
+ ## Sub-project log
+ 
+ 1. Dark mode: COMPLETE (commit ba5b576, review clean — approved, no
+    Critical/Important). Minor deferred: `.catbox__item input`
+    `accent-color: var(--ink)` not addressed by the theme flip (checkbox
+    tick may render near-white on dark) — cosmetic, low priority, revisit
+    if noticed live.
+ 
+-## Sub-project 2 prep (Visão Geral) — grounded, ready to dispatch once #1 closes
+-- New page apps/web/src/pages/VisaoGeral.tsx. Route "/" -> VisaoGeral,
+-  Fila moves to "/fila" (App.tsx). Layout.tsx GROUPS: add a new
+-  `{ label: null, items: [{ to: '/', label: 'Visão geral', end: true }] }`
+-  entry before the existing Fila one; change the existing Fila entry's
+-  `to` to '/fila'; the pending-count badge condition in the nav render
+-  (`l.to === '/'`) must become `l.to === '/fila'`.
+-- Data: GET /api/stats/overview?days=1 (pending/queued are NOT date-filtered
+-  server-side, so this is safe to use for "hoje" framing) gives pending,
+-  queued, clicks.value, sent.value. GET /api/whatsapp/status gives
+-  groups[] (length = grupos ativos) and quota.
+-- Reuse existing CSS: .panel, .panel--hero (from the sidebar/hero
+-  redesign), .grid-kpi/.kpi (from Desempenho), .empty. Avoid new CSS
+-  where these already fit.
+-- Hero CTA card: do NOT promise a "Garimpar" flow — that page doesn't
+-  exist yet (sub-project 8). Point it at /fila with honest copy.
+-- "Disparos em andamento" and the two ranking/heatmap blocks: Disparos
+-  doesn't exist yet (sub-project 5) — render as honest "em breve" panels,
+-  not fake data, matching the reference mockup's own placeholder pattern.
++2. Visão Geral: COMPLETE (commit 6063df0, review clean — approved, zero
++   findings; reviewer independently verified route table, API response
++   shapes against the real handlers, and placeholder honesty).
++
++3. Fila platform filter: COMPLETE (commit ec67c66, review clean —
++   approved). Position-numbering requirement verified by both me and the
++   reviewer: `offers.map((o,i) => ({offer:o, posicao:i+1})).filter(...)`
++   keeps `#74` as `#74` under a filter. Minor deferred: one-render-frame
++   empty `.shelf` flash when the selected platform's last offer is
++   sent/skipped (effect resets to "Todos" post-paint, self-heals next
++   commit) — cosmetic, not stranding.
++
++4. Templates + CTA rotativo: COMPLETE (commits 1f0935a + fedc096, review
++   approved, only Minors). Schema APPLIED to the live DB — user approved
++   after seeing the `prisma migrate diff` SQL (pure CREATE TABLE +
++   CREATE INDEX, zero ALTER/DROP on existing tables).
++   Owner decision mid-flight: empty token now drops the WHOLE line
++   (`.some` not `.every`), since "De por *R$89*" was broken output. User
++   was warned that a mixed line like `{TITULO} {CUPOM}` vanishes wholly
++   when there's no coupon, and accepted it.
++   Minors deferred: (a) dead `v === null ? '' : v` branch in the token
++   replace callback; (b) empty-body + non-empty CTA leaves leading
++   `\n\n`; (c) `isDefault` maintained by two non-atomic queries (could
++   yield two defaults); (d) un-checking "Padrão" via PUT leaves ZERO
++   defaults with no auto-promotion (DELETE does promote).
++   >>> MITIGATION for (c)/(d): Disparos must NOT depend on "exactly one
++   default template" — it requires an explicit template pick in the
++   wizard, no silent fallback to the default. This sidesteps the
++   invariant entirely rather than hardening it. <<<
++
++5. Disparos: design locked with the user (see decisions below), about to
++   dispatch.
++   - Offers move OUT of Fila when added to a disparo; cancelling returns
++     them to PENDING.
++   - Multi-group = one send per (offer, group) pair, each respecting the
++     interval (no burst).
++   - "Não enviar oferta expirada": toggle rendered but INERT for now,
++     user chose to defer the expiry-detection mechanism.
++   - Minimum interval 5 minutes.
++
++## RULING: schema changes are written but NOT applied tonight
++
++This project has NO Prisma migrations folder — `apps/api/package.json` only
++has `db:push` (`prisma db push`), i.e. the schema-push workflow. Applying
++any schema change therefore means writing directly to the LIVE Postgres in
++the running Docker container, which is exactly what the user said not to
++touch while asleep.
++
++Decision for sub-projects 4 (Templates), 5 (Disparos), 6 (Meus Grupos) —
++all of which need new models:
++- DO edit `apps/api/prisma/schema.prisma`.
++- DO run `npx prisma generate` — this only regenerates the TypeScript
++  client from the schema file, makes NO database connection, so typecheck
++  can pass against the new models.
++- DO write all API routes + frontend against the new models.
++- Do NOT run `db:push`, `migrate`, or `db:studio`. The code will compile
++  but the new endpoints will fail at runtime until the user applies the
++  schema in the morning.
++- Every such sub-project must be reported to the user as "code done,
++  schema pending `npm run db:push --workspace=apps/api`".
++
++Cost if wrong: the user wakes up to code that doesn't run until they run
++one command — clearly documented, one line to fix. The alternative
++(pushing schema to a live DB unattended) risks their real data.
++
++## Sub-project 6 prep (Meus Grupos) — grounded, ready to dispatch
++- Member count IS available and currently thrown away:
++  `apps/api/src/whatsapp/baileys.ts:194` calls
++  `this.sock.groupFetchAllParticipating()`, whose metadata includes a
++  `participants` array, but `syncGroups()` only persists `subject` (name).
++  So `meta.participants.length` is a free win — no new Baileys wiring.
++- Schema: add `memberCount Int?` to `WhatsappGroup` (current snapshot),
++  plus a new `GroupSnapshot { id, groupJid, memberCount, takenAt }` model
++  so week/month deltas can be computed. Index on `[groupJid, takenAt]`.
++- `syncGroups()` writes both the current count and a daily snapshot
++  (upsert-by-day so repeated syncs in one day don't inflate the series).
++- node-cron is already a dependency and workers are already scheduled
++  (see server.ts / workers) — add a daily snapshot job there.
++- HONESTY REQUIREMENT for the UI: growth history only starts accumulating
++  the day this ships. The page must say so rather than rendering "0 em
++  30d" as if it were a measured zero. This is exactly the trap the
++  Garimpa Links reference screenshot falls into.
++- Blocked on the same schema ruling below (code yes, `db:push` no).
++
++## Sub-project 3 prep (Fila platform filter) — grounded, ready to dispatch
++- Zero backend change needed. `GET /api/offers` already returns each
++  offer's `product.platform` (apps/api/src/routes/offers.ts serialize()).
++  Fila.tsx already loads the full PENDING offers array into state. A
++  client-side filter (derive a Set of platforms present, render filter
++  chips reusing `.tabs`/`.chip` CSS already in styles.css, filter the
++  `offers` array before rendering `.shelf`) is the whole implementation.
++  `STORE` (platform code -> display name map) already exists in api.ts,
++  reuse it for chip labels.
+ 
+diff --git a/.superpowers/reviews/dark-mode.diff b/.superpowers/reviews/dark-mode.diff
+new file mode 100644
+index 0000000..8b0469a
+--- /dev/null
++++ b/.superpowers/reviews/dark-mode.diff
+@@ -0,0 +1,226 @@
++ba5b576 feat(web): modo escuro com toggle em Conexões
++---
++ apps/web/src/main.tsx           |  3 ++
++ apps/web/src/pages/Conexoes.tsx | 25 ++++++++++++++++
++ apps/web/src/styles.css         | 65 +++++++++++++++++++++++++++++++++++++++++
++ apps/web/src/theme.ts           | 16 ++++++++++
++ 4 files changed, 109 insertions(+)
++---
++diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
++index 1160619..d60fadb 100644
++--- a/apps/web/src/main.tsx
+++++ b/apps/web/src/main.tsx
++@@ -1,13 +1,16 @@
++ import React from 'react';
++ import ReactDOM from 'react-dom/client';
++ import { BrowserRouter } from 'react-router-dom';
++ import App from './App.js';
++ import './styles.css';
+++import { applyStoredTheme } from './theme.js';
+++
+++applyStoredTheme();
++ 
++ ReactDOM.createRoot(document.getElementById('root')!).render(
++   <React.StrictMode>
++     <BrowserRouter>
++       <App />
++     </BrowserRouter>
++   </React.StrictMode>,
++ );
++diff --git a/apps/web/src/pages/Conexoes.tsx b/apps/web/src/pages/Conexoes.tsx
++index d14da31..212e802 100644
++--- a/apps/web/src/pages/Conexoes.tsx
+++++ b/apps/web/src/pages/Conexoes.tsx
++@@ -1,12 +1,13 @@
++ import { useEffect, useState } from 'react';
++ import { api } from '../api.js';
+++import { getTheme, setTheme } from '../theme.js';
++ 
++ interface PlatformInfo {
++   platform: string;
++   label: string;
++   connected: boolean;
++   lastCheck: string | null;
++   lastError: string | null;
++   preview: Record<string, string>;
++   fields: { name: string; label: string; secret: boolean; help?: string }[];
++ }
++@@ -201,31 +202,55 @@ export function Conexoes() {
++                   void loadWa();
++                 }}
++               >
++                 Apagar sessão e parear do zero
++               </button>
++             </div>
++           </>
++         )}
++       </div>
++ 
+++      <AparenciaCard />
+++
++       <ExtensaoCard />
++ 
++       {[...platforms]
++         .sort((a, b) => Number(b.connected) - Number(a.connected))
++         .map((p) => (
++           <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
++         ))}
++     </>
++   );
++ }
++ 
+++function AparenciaCard() {
+++  const [theme, setThemeState] = useState(getTheme());
+++
+++  return (
+++    <div className="panel">
+++      <h2 className="panel__title">Aparência</h2>
+++      <div className="row">
+++        <button
+++          className="btn btn--ghost"
+++          onClick={() => {
+++            const next = theme === 'dark' ? 'light' : 'dark';
+++            setTheme(next);
+++            setThemeState(next);
+++          }}
+++        >
+++          {theme === 'dark' ? 'Modo claro' : 'Modo escuro'}
+++        </button>
+++      </div>
+++    </div>
+++  );
+++}
+++
++ /**
++  * A extensao do navegador e o unico caminho pro Mercado Livre: eles nao tem
++  * API de afiliados e bloqueiam leitura de fora. Ela autentica por este token,
++  * nao pela sessao do painel -- fala de outra origem e nao carrega o cookie.
++  */
++ function ExtensaoCard() {
++   const [token, setToken] = useState<string | null>(null);
++   const [aberto, setAberto] = useState(false);
++   const [copiado, setCopiado] = useState(false);
++ 
++diff --git a/apps/web/src/styles.css b/apps/web/src/styles.css
++index 75f6f87..99dbb78 100644
++--- a/apps/web/src/styles.css
+++++ b/apps/web/src/styles.css
++@@ -19,20 +19,34 @@
++   --muted: #74787f;
++   --line: #d8dadd;
++ 
++   --display: 'Archivo', system-ui, sans-serif;
++   --mono: 'IBM Plex Mono', ui-monospace, monospace;
++ 
++   --r: 3px;
++   --shadow: 0 1px 0 rgba(22, 23, 26, 0.06), 0 2px 8px rgba(22, 23, 26, 0.06);
++ }
++ 
+++/* Modo escuro: mesmos nomes de token, valores invertidos. --brand/--tag,
+++   --display, --mono e --r ficam de fora -- não mudam entre temas. */
+++[data-theme='dark'] {
+++  --ink: #f2f2f0;
+++  --canvas: #1c1d20;
+++  --surface: #232427;
+++  --drop: #ff6b52;
+++  --gain: #22a866;
+++  --muted: #9a9da3;
+++  --line: #34353a;
+++
+++  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 2px 10px rgba(0, 0, 0, 0.5);
+++}
+++
++ * {
++   box-sizing: border-box;
++ }
++ 
++ html,
++ body,
++ #root {
++   height: 100%;
++ }
++ 
++@@ -1319,10 +1333,61 @@ button.chip {
++ 
++   .card__botoes {
++     grid-template-columns: 1fr 1.6fr;
++     gap: 10px;
++   }
++ 
++   .card__enviar {
++     font-size: 12.5px;
++   }
++ }
+++
+++/* ---------------------------------------------------------------
+++   Modo escuro: ajustes pontuais
+++   O flip de token quebra qualquer lugar que usava --ink como FUNDO
+++   escuro fixo (rail, botão primário, aba ativa, mark do login) --
+++   nesses o --ink virou texto claro, então o fundo precisa ficar preso
+++   num tom escuro. E qualquer lugar com texto var(--ink) sobre fundo
+++   var(--brand)/var(--tag) (que não muda de cor) também precisa do
+++   texto preso em escuro, senão vira texto quase-branco sobre amarelo.
+++   --------------------------------------------------------------- */
+++
+++[data-theme='dark'] .rail {
+++  background: #16171a;
+++}
+++
+++[data-theme='dark'] .login__mark {
+++  background: #16171a;
+++}
+++
+++[data-theme='dark'] .btn:not(.btn--ghost):not(.btn--tag) {
+++  background: #3a3b40;
+++  border-color: #3a3b40;
+++}
+++
+++[data-theme='dark'] .tabs__item[data-on='true'] {
+++  background: #3a3b40;
+++  border-color: #3a3b40;
+++}
+++
+++[data-theme='dark'] .rail__count,
+++[data-theme='dark'] .btn--tag,
+++[data-theme='dark'] .tag__score,
+++[data-theme='dark'] .tabs__item[data-on='true'] span,
+++[data-theme='dark'] .card__selo,
+++[data-theme='dark'] .card__nicho {
+++  color: #16171a;
+++}
+++
+++/* Caixa de estado vazio usava branco translúcido sobre o papel claro;
+++   em fundo escuro isso lava pra um bloco claro com texto var(--ink)
+++   (agora claro) em cima -- quase ilegível. */
+++[data-theme='dark'] .empty {
+++  background: rgba(255, 255, 255, 0.04);
+++}
+++
+++/* O poço da foto do card fica claro de propósito nos dois temas (fundo
+++   neutro pra foto de loja), então o texto "sem foto" não pode seguir o
+++   flip de --muted -- ficaria cinza claro sobre fundo claro. */
+++[data-theme='dark'] .card__semfoto {
+++  color: #74787f;
+++}
++diff --git a/apps/web/src/theme.ts b/apps/web/src/theme.ts
++new file mode 100644
++index 0000000..6b0568b
++--- /dev/null
+++++ b/apps/web/src/theme.ts
++@@ -0,0 +1,16 @@
+++const KEY = 'hub-theme';
+++
+++export type Theme = 'light' | 'dark';
+++
+++export function getTheme(): Theme {
+++  return localStorage.getItem(KEY) === 'dark' ? 'dark' : 'light';
+++}
+++
+++export function setTheme(theme: Theme): void {
+++  localStorage.setItem(KEY, theme);
+++  document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : '';
+++}
+++
+++export function applyStoredTheme(): void {
+++  setTheme(getTheme());
+++}
+diff --git a/.superpowers/reviews/fila-filtro.diff b/.superpowers/reviews/fila-filtro.diff
+new file mode 100644
+index 0000000..c0f08c4
+--- /dev/null
++++ b/.superpowers/reviews/fila-filtro.diff
+@@ -0,0 +1,173 @@
++ec67c66 feat(web): filtro por plataforma na fila
++---
++ apps/web/src/pages/Fila.tsx | 63 +++++++++++++++++++++++++++++++++++----------
++ 1 file changed, 50 insertions(+), 13 deletions(-)
++---
++diff --git a/apps/web/src/pages/Fila.tsx b/apps/web/src/pages/Fila.tsx
++index 2159789..9fd8631 100644
++--- a/apps/web/src/pages/Fila.tsx
+++++ b/apps/web/src/pages/Fila.tsx
++@@ -13,30 +13,31 @@ interface Found {
++   commissionPct?: number;
++   error?: string;
++ }
++ 
++ /** Quantas ofertas cada nicho tem parada na fila. */
++ interface AbaNicho {
++   nicheId: string;
++   nome: string;
++   total: number;
++ }
++ 
++ export function Fila() {
++   const [offers, setOffers] = useState<Offer[]>([]);
++   const [abas, setAbas] = useState<AbaNicho[]>([]);
++   const [aba, setAba] = useState('');
+++  const [plataforma, setPlataforma] = useState('');
++   const [loading, setLoading] = useState(true);
++   const [enviadasHoje, setEnviadasHoje] = useState<number | null>(null);
++   const [url, setUrl] = useState('');
++   const [note, setNote] = useState('');
++   const [adding, setAdding] = useState(false);
++   const [error, setError] = useState<string | null>(null);
++ 
++   const [term, setTerm] = useState('');
++   const [found, setFound] = useState<Found[] | null>(null);
++   const [searching, setSearching] = useState(false);
++ 
++   const [limpando, setLimpando] = useState(false);
++   const [limpandoFila, setLimpandoFila] = useState(false);
++   const [aviso, setAviso] = useState<string | null>(null);
++ 
++@@ -48,30 +49,45 @@ export function Fila() {
++     try {
++       const query = filtro ? `&nicheId=${encodeURIComponent(filtro)}` : '';
++       setOffers(await api.get<Offer[]>(`/api/offers?status=PENDING${query}`));
++       setAbas(await api.get<AbaNicho[]>('/api/offers/por-nicho?status=PENDING'));
++       void carregarEnviadasHoje();
++     } finally {
++       setLoading(false);
++     }
++   }
++ 
++   useEffect(() => {
++     void load(aba);
++     // eslint-disable-next-line react-hooks/exhaustive-deps
++   }, [aba]);
++ 
+++  /** Quantas ofertas de cada plataforma estao na fila carregada. */
+++  const contagemPlataforma = offers.reduce<Record<string, number>>((acc, o) => {
+++    const p = o.product.platform;
+++    acc[p] = (acc[p] ?? 0) + 1;
+++    return acc;
+++  }, {});
+++  const plataformas = Object.keys(contagemPlataforma);
+++
+++  // Se a plataforma escolhida sumiu da fila (oferta enviada/pulada, ou troca de aba de nicho),
+++  // volta pra "Todos" em vez de deixar a grade vazia sem saida.
+++  useEffect(() => {
+++    if (plataforma && !contagemPlataforma[plataforma]) setPlataforma('');
+++    // eslint-disable-next-line react-hooks/exhaustive-deps
+++  }, [offers]);
+++
++   async function carregarEnviadasHoje() {
++     try {
++       const r = await api.get<{ total: number }>('/api/offers/enviadas-hoje');
++       setEnviadasHoje(r.total);
++     } catch {
++       // contador e informativo -- uma falha aqui nao pode travar a fila
++     }
++   }
++ 
++   useEffect(() => {
++     void carregarEnviadasHoje();
++   }, []);
++ 
++   async function addUrl() {
++     setAdding(true);
++@@ -320,51 +336,72 @@ export function Fila() {
++             Todos <span>{abas.reduce((n, a) => n + a.total, 0)}</span>
++           </button>
++           {abas.map((a) => (
++             <button
++               key={a.nicheId}
++               className="tabs__item"
++               data-on={aba === a.nicheId}
++               onClick={() => setAba(a.nicheId)}
++             >
++               {a.nome} <span>{a.total}</span>
++             </button>
++           ))}
++         </div>
++       )}
++ 
+++      {plataformas.length > 1 && (
+++        <div className="tabs">
+++          <button className="tabs__item" data-on={plataforma === ''} onClick={() => setPlataforma('')}>
+++            Todos <span>{offers.length}</span>
+++          </button>
+++          {plataformas.map((p) => (
+++            <button
+++              key={p}
+++              className="tabs__item"
+++              data-on={plataforma === p}
+++              onClick={() => setPlataforma(p)}
+++            >
+++              {STORE[p] ?? p} <span>{contagemPlataforma[p]}</span>
+++            </button>
+++          ))}
+++        </div>
+++      )}
+++
++       {loading ? null : offers.length === 0 ? (
++         <div className="empty">
++           <strong>Fila vazia</strong>
++           Cole um link acima, ou espere os workers: o monitor de preço roda de hora em hora e o garimpo a cada 3
++           horas.
++         </div>
++       ) : (
++         <div className="shelf">
++-          {offers.map((o, i) => (
++-            <PriceTag
++-              key={o.id}
++-              offer={o}
++-              posicao={i + 1}
++-              onSend={send}
++-              onSkip={skip}
++-              onEdit={(offer) => {
++-                setEditing(offer);
++-                setDraft(offer.message);
++-              }}
++-            />
++-          ))}
+++          {offers
+++            .map((o, i) => ({ offer: o, posicao: i + 1 }))
+++            .filter(({ offer }) => !plataforma || offer.product.platform === plataforma)
+++            .map(({ offer, posicao }) => (
+++              <PriceTag
+++                key={offer.id}
+++                offer={offer}
+++                posicao={posicao}
+++                onSend={send}
+++                onSkip={skip}
+++                onEdit={(o) => {
+++                  setEditing(o);
+++                  setDraft(o.message);
+++                }}
+++              />
+++            ))}
++         </div>
++       )}
++ 
++       {editing && (
++         <div className="panel" style={{ marginTop: 20 }}>
++           <h2 className="panel__title">Texto que vai pro grupo</h2>
++           <textarea rows={12} value={draft} onChange={(e) => setDraft(e.target.value)} />
++           <div className="row" style={{ marginTop: 12 }}>
++             <button className="btn" onClick={() => void saveDraft()}>
++               Salvar texto
++             </button>
++             <button
++               className="btn btn--ghost"
++               onClick={async () => {
++                 const rebuilt = await api.post<Offer>(`/api/offers/${editing.id}/rebuild`);
+diff --git a/.superpowers/reviews/templates.diff b/.superpowers/reviews/templates.diff
+new file mode 100644
+index 0000000..6605ef3
+--- /dev/null
++++ b/.superpowers/reviews/templates.diff
+@@ -0,0 +1,723 @@
++fedc096 fix(templates): linha com token vazio some inteira
++1f0935a feat(templates): CRUD de modelos de mensagem com CTA sorteado
++---
++ .superpowers/templates-report.md   | 218 ++++++++++++++++++++++++
++ apps/api/prisma/schema.prisma      |  16 ++
++ apps/api/src/routes/templates.ts   | 104 ++++++++++++
++ apps/api/src/server.ts             |   2 +
++ apps/api/src/services/message.ts   |   2 +-
++ apps/api/src/services/template.ts  |  73 ++++++++
++ apps/web/src/App.tsx               |   2 +
++ apps/web/src/components/Layout.tsx |   1 +
++ apps/web/src/pages/Templates.tsx   | 333 +++++++++++++++++++++++++++++++++++++
++ 9 files changed, 750 insertions(+), 1 deletion(-)
++---
++diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
++index 51a7880..b61e37b 100644
++--- a/apps/api/prisma/schema.prisma
+++++ b/apps/api/prisma/schema.prisma
++@@ -317,16 +317,32 @@ model AppSetting {
++ }
++ 
++ model WhatsappGroup {
++   id        String   @id @default(cuid())
++   jid       String   @unique
++   name      String
++   isDefault Boolean  @default(false)
++   updatedAt DateTime @updatedAt
++ }
++ 
+++/// Modelo de mensagem reaproveitavel. Corpo com tokens ({TITULO} {PRECO}
+++/// {PRECO_ANTIGO} {LINK} {CUPOM}) trocados pelos dados da oferta na hora do
+++/// envio. `ctas` e um pool de chamadas finais -- uma sorteada por envio, pra
+++/// nao repetir sempre a mesma linha. Ainda nao e usado por nada: existe pra
+++/// alimentar a futura tela de Disparos.
+++model MessageTemplate {
+++  id        String   @id @default(cuid())
+++  name      String   @unique
+++  body      String
+++  ctas      String[] @default([])
+++  showImage Boolean  @default(true)
+++  isDefault Boolean  @default(false)
+++  createdAt DateTime @default(now())
+++  updatedAt DateTime @updatedAt
+++}
+++
++ /// Contador diario de envios, pra respeitar o teto e nao queimar o numero.
++ model SendLog {
++   id     String   @id @default(cuid())
++   day    String   @unique
++   count  Int      @default(0)
++ }
++diff --git a/apps/api/src/routes/templates.ts b/apps/api/src/routes/templates.ts
++new file mode 100644
++index 0000000..a8b2ab0
++--- /dev/null
+++++ b/apps/api/src/routes/templates.ts
++@@ -0,0 +1,104 @@
+++import type { FastifyInstance } from 'fastify';
+++import { z } from 'zod';
+++import { prisma } from '../db.js';
+++import { renderTemplate } from '../services/template.js';
+++
+++const corpoTemplate = z.object({
+++  name: z.string().min(2, 'O nome precisa de pelo menos 2 letras.').max(60),
+++  body: z.string().min(1, 'O texto não pode ficar vazio.'),
+++  ctas: z.array(z.string().min(1).max(120)).max(20).default([]),
+++  showImage: z.boolean().default(true),
+++  isDefault: z.boolean().default(false),
+++});
+++
+++const serialize = (t: any) => ({
+++  id: t.id,
+++  name: t.name,
+++  body: t.body,
+++  ctas: t.ctas,
+++  showImage: t.showImage,
+++  isDefault: t.isDefault,
+++  createdAt: t.createdAt,
+++  updatedAt: t.updatedAt,
+++});
+++
+++/** Oferta de mentira, só pra pré-visualização renderizar sem precisar de oferta real. */
+++const OFERTA_EXEMPLO = {
+++  title: 'Fone de Ouvido Bluetooth XYZ Pro',
+++  price: 89.9,
+++  comparePrice: 149.9,
+++  couponCode: 'PROMO10',
+++  link: 'https://oferta.hub/r/exemplo',
+++};
+++
+++export async function templateRoutes(app: FastifyInstance) {
+++  app.get('/api/templates', async () => {
+++    const templates = await prisma.messageTemplate.findMany({
+++      orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+++    });
+++    return templates.map(serialize);
+++  });
+++
+++  app.post('/api/templates', async (req, reply) => {
+++    const body = corpoTemplate.parse(req.body);
+++    const existe = await prisma.messageTemplate.findUnique({ where: { name: body.name } });
+++    if (existe) return reply.code(409).send({ error: 'Já existe um modelo com esse nome.' });
+++
+++    // Primeiro modelo do zero: já nasce padrão, senão a lista fica sem
+++    // nenhum pré-selecionado.
+++    const total = await prisma.messageTemplate.count();
+++    const isDefault = body.isDefault || total === 0;
+++
+++    if (isDefault) {
+++      await prisma.messageTemplate.updateMany({ where: { isDefault: true }, data: { isDefault: false } });
+++    }
+++    const criado = await prisma.messageTemplate.create({ data: { ...body, isDefault } });
+++    return reply.code(201).send(serialize(criado));
+++  });
+++
+++  app.put<{ Params: { id: string } }>('/api/templates/:id', async (req, reply) => {
+++    const body = corpoTemplate.parse(req.body);
+++    const atual = await prisma.messageTemplate.findUnique({ where: { id: req.params.id } });
+++    if (!atual) return reply.code(404).send({ error: 'Modelo não encontrado.' });
+++
+++    const outroComMesmoNome = await prisma.messageTemplate.findUnique({ where: { name: body.name } });
+++    if (outroComMesmoNome && outroComMesmoNome.id !== req.params.id) {
+++      return reply.code(409).send({ error: 'Já existe um modelo com esse nome.' });
+++    }
+++
+++    if (body.isDefault) {
+++      await prisma.messageTemplate.updateMany({
+++        where: { isDefault: true, id: { not: req.params.id } },
+++        data: { isDefault: false },
+++      });
+++    }
+++    const atualizado = await prisma.messageTemplate.update({ where: { id: req.params.id }, data: body });
+++    return serialize(atualizado);
+++  });
+++
+++  app.delete<{ Params: { id: string } }>('/api/templates/:id', async (req, reply) => {
+++    const t = await prisma.messageTemplate.findUnique({ where: { id: req.params.id } });
+++    if (!t) return { ok: true };
+++    await prisma.messageTemplate.delete({ where: { id: req.params.id } });
+++
+++    // Apagou o padrão: promove o mais recente que sobrou, pra sempre existir
+++    // um pré-selecionado enquanto houver ao menos um modelo.
+++    if (t.isDefault) {
+++      const proximo = await prisma.messageTemplate.findFirst({ orderBy: { createdAt: 'desc' } });
+++      if (proximo) await prisma.messageTemplate.update({ where: { id: proximo.id }, data: { isDefault: true } });
+++    }
+++    return { ok: true };
+++  });
+++
+++  /** Renderiza um corpo (ainda não salvo) contra uma oferta de mentira, pra UI mostrar o resultado sem precisar de oferta real. */
+++  app.post('/api/templates/preview', async (req, reply) => {
+++    const body = z
+++      .object({ body: z.string(), ctas: z.array(z.string()).default([]) })
+++      .parse(req.body);
+++    try {
+++      return { text: renderTemplate(body.body, OFERTA_EXEMPLO, body.ctas) };
+++    } catch (err) {
+++      return reply.code(400).send({ error: err instanceof Error ? err.message : 'Falha ao renderizar.' });
+++    }
+++  });
+++}
++diff --git a/apps/api/src/server.ts b/apps/api/src/server.ts
++index b04ead1..f4a736d 100644
++--- a/apps/api/src/server.ts
+++++ b/apps/api/src/server.ts
++@@ -6,20 +6,21 @@ import { env } from './env.js';
++ import { prisma } from './db.js';
++ import { logger } from './lib/logger.js';
++ import { authRoutes, requireAuth } from './plugins/auth.js';
++ import { automacaoRoutes } from './routes/automacoes.js';
++ import { credentialRoutes } from './routes/credentials.js';
++ import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
++ import { nichoRoutes } from './routes/nichos.js';
++ import { offerRoutes } from './routes/offers.js';
++ import { redirectRoutes } from './routes/redirect.js';
++ import { statsRoutes } from './routes/stats.js';
+++import { templateRoutes } from './routes/templates.js';
++ import { watchRoutes } from './routes/watch.js';
++ import { whatsappRoutes } from './routes/whatsapp.js';
++ import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
++ import { whatsapp } from './whatsapp/baileys.js';
++ 
++ const app = Fastify({ logger: false, trustProxy: true });
++ 
++ // Precisa vir ANTES de qualquer plugin/rota: o Fastify amarra o handler de
++ // erro a cada rota no momento em que ela e registrada, nao dinamicamente --
++ // declarado depois (como estava), nenhuma rota do app usava esse handler, e
++@@ -68,20 +69,21 @@ await app.register(extensaoRoutes);
++ 
++ // Tudo abaixo exige sessao.
++ await app.register(async (instance) => {
++   instance.addHook('onRequest', requireAuth);
++   await instance.register(automacaoRoutes);
++   await instance.register(credentialRoutes);
++   await instance.register(extensaoAdminRoutes);
++   await instance.register(nichoRoutes);
++   await instance.register(offerRoutes);
++   await instance.register(statsRoutes);
+++  await instance.register(templateRoutes);
++   await instance.register(watchRoutes);
++   await instance.register(whatsappRoutes);
++ 
++   // Disparo manual dos workers, pra testar sem esperar o cron.
++   // Espera terminar e devolve o resumo: sem isso o clique e indistinguivel de
++   // nada acontecer quando a lista esta vazia ou a plataforma recusa.
++   instance.post('/api/jobs/price-monitor', async () => ({ ok: true, ...(await runPriceMonitor()) }));
++   instance.post('/api/jobs/discovery', async () => ({ ok: true, ...(await runDiscovery()) }));
++   instance.post('/api/jobs/category-sync', async () => ({ ok: true, ...(await runCategorySync()) }));
++ });
++diff --git a/apps/api/src/services/message.ts b/apps/api/src/services/message.ts
++index 09a6b1e..634b00c 100644
++--- a/apps/api/src/services/message.ts
+++++ b/apps/api/src/services/message.ts
++@@ -19,21 +19,21 @@ export interface MessageInput {
++   anuncio?: boolean;
++ }
++ 
++ /**
++  * "R$ 468" quando nao ha centavos, "R$ 33,66" quando ha.
++  *
++  * O modelo em que este formato se baseia arredonda tudo pra reais inteiros.
++  * Aqui nao: dizer "R$ 13" num produto de R$ 12,10 e anunciar preco errado, e
++  * o ganho estetico nao paga isso. Sem centavos o numero ja fica limpo.
++  */
++-const brl = (v: number): string => {
+++export const brl = (v: number): string => {
++   const inteiro = Number.isInteger(v);
++   return v.toLocaleString('pt-BR', {
++     style: 'currency',
++     currency: 'BRL',
++     minimumFractionDigits: inteiro ? 0 : 2,
++     maximumFractionDigits: 2,
++   });
++ };
++ 
++ /** Corta o titulo sem quebrar palavra no meio. */
++diff --git a/apps/api/src/services/template.ts b/apps/api/src/services/template.ts
++new file mode 100644
++index 0000000..1df8f5e
++--- /dev/null
+++++ b/apps/api/src/services/template.ts
++@@ -0,0 +1,73 @@
+++import { brl } from './message.js';
+++
+++export interface TemplateOfferData {
+++  title: string;
+++  price: number;
+++  /** Nulo ou menor/igual ao preco atual = sem "de/por" pra mostrar. */
+++  comparePrice?: number | null;
+++  couponCode?: string | null;
+++  link: string;
+++}
+++
+++type Token = 'TITULO' | 'PRECO' | 'PRECO_ANTIGO' | 'LINK' | 'CUPOM';
+++
+++function valores(d: TemplateOfferData): Record<Token, string | null> {
+++  return {
+++    TITULO: d.title,
+++    PRECO: brl(d.price),
+++    PRECO_ANTIGO: d.comparePrice && d.comparePrice > d.price ? brl(d.comparePrice) : null,
+++    LINK: d.link,
+++    CUPOM: d.couponCode || null,
+++  };
+++}
+++
+++const TOKEN_RE = /\{([A-Z_]+)\}/g;
+++
+++/**
+++ * Troca os tokens {TITULO} {PRECO} {PRECO_ANTIGO} {LINK} {CUPOM} pelos dados
+++ * da oferta.
+++ *
+++ * Token desconhecido (typo tipo {TITULOO}): fica intacto no texto -- apagar
+++ * silenciosamente esconderia o erro de quem escreveu o modelo.
+++ *
+++ * Token conhecido sem valor (sem cupom, sem preco antigo): a linha inteira
+++ * some, mesmo que outros tokens dela tenham valor. Motivo: uma linha como
+++ * "De ~{PRECO_ANTIGO}~ por *{PRECO}*" sem preco antigo nao vira frase
+++ * valida so tirando o token ("De por *R$ 89,90*") -- fica quebrada. Por
+++ * isso quem escreve o modelo deve colocar o fallback (o preco simples)
+++ * numa linha propria separada, ja que uma linha mista some por inteiro.
+++ */
+++export function renderTemplate(
+++  body: string,
+++  data: TemplateOfferData,
+++  ctas: string[] = [],
+++  escolherCta: (opcoes: string[]) => string = (opcoes) => opcoes[Math.floor(Math.random() * opcoes.length)],
+++): string {
+++  const vals = valores(data);
+++
+++  const linhas = body.split('\n').map((linha) => {
+++    const tokensConhecidos = [...linha.matchAll(TOKEN_RE)]
+++      .map((m) => m[1] as Token)
+++      .filter((nome) => nome in vals);
+++
+++    if (tokensConhecidos.length > 0 && tokensConhecidos.some((nome) => vals[nome] === null)) {
+++      return null; // linha tinha um token conhecido sem valor
+++    }
+++
+++    const out = linha.replace(TOKEN_RE, (match, nome: string) => {
+++      if (!(nome in vals)) return match; // token desconhecido: mantem visivel
+++      const v = vals[nome as Token];
+++      return v === null ? '' : v;
+++    });
+++    return out.replace(/ {2,}/g, ' ').trim();
+++  });
+++
+++  let texto = linhas.filter((l): l is string => l !== null).join('\n');
+++  texto = texto.replace(/\n{3,}/g, '\n\n'); // sobra rara de espaçamento ao redor de uma linha removida
+++
+++  if (ctas.length > 0) {
+++    texto = `${texto}\n\n${escolherCta(ctas)}`;
+++  }
+++
+++  return texto;
+++}
++diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
++index 8a3ec72..d31cb1e 100644
++--- a/apps/web/src/App.tsx
+++++ b/apps/web/src/App.tsx
++@@ -3,20 +3,21 @@ import { Route, Routes } from 'react-router-dom';
++ import { api } from './api.js';
++ import { Layout } from './components/Layout.js';
++ import { Logo } from './components/Logo.js';
++ import { VisaoGeral } from './pages/VisaoGeral.js';
++ import { Fila } from './pages/Fila.js';
++ import { Desempenho } from './pages/Desempenho.js';
++ import { Nichos } from './pages/Nichos.js';
++ import { Produtos } from './pages/Produtos.js';
++ import { Agenda } from './pages/Agenda.js';
++ import { Automacoes } from './pages/Automacoes.js';
+++import { Templates } from './pages/Templates.js';
++ import { Conexoes } from './pages/Conexoes.js';
++ 
++ function Login({ onIn }: { onIn: () => void }) {
++   const [password, setPassword] = useState('');
++   const [error, setError] = useState<string | null>(null);
++   const [busy, setBusy] = useState(false);
++ 
++   async function submit() {
++     setBusy(true);
++     setError(null);
++@@ -79,15 +80,16 @@ export default function App() {
++   return (
++     <Layout>
++       <Routes>
++         <Route path="/" element={<VisaoGeral />} />
++         <Route path="/fila" element={<Fila />} />
++         <Route path="/desempenho" element={<Desempenho />} />
++         <Route path="/produtos" element={<Produtos />} />
++         <Route path="/nichos" element={<Nichos />} />
++         <Route path="/agenda" element={<Agenda />} />
++         <Route path="/automacoes" element={<Automacoes />} />
+++        <Route path="/templates" element={<Templates />} />
++         <Route path="/conexoes" element={<Conexoes />} />
++       </Routes>
++     </Layout>
++   );
++ }
++diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
++index 0432878..516ff68 100644
++--- a/apps/web/src/components/Layout.tsx
+++++ b/apps/web/src/components/Layout.tsx
++@@ -13,20 +13,21 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
++     items: [
++       { to: '/nichos', label: 'Nichos' },
++       { to: '/produtos', label: 'Preços vigiados' },
++     ],
++   },
++   {
++     label: 'Automação',
++     items: [
++       { to: '/agenda', label: 'Agenda' },
++       { to: '/automacoes', label: 'Automações' },
+++      { to: '/templates', label: 'Modelos' },
++     ],
++   },
++   { label: 'Métricas', items: [{ to: '/desempenho', label: 'Desempenho' }] },
++   { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
++ ];
++ 
++ export function Layout({ children }: { children: React.ReactNode }) {
++   const [pending, setPending] = useState(0);
++   const [wa, setWa] = useState<{ status: string; quota: { used: number; cap: number } } | null>(null);
++   const location = useLocation();
++diff --git a/apps/web/src/pages/Templates.tsx b/apps/web/src/pages/Templates.tsx
++new file mode 100644
++index 0000000..096295d
++--- /dev/null
+++++ b/apps/web/src/pages/Templates.tsx
++@@ -0,0 +1,333 @@
+++import { useEffect, useRef, useState } from 'react';
+++import { api } from '../api.js';
+++
+++interface Template {
+++  id: string;
+++  name: string;
+++  body: string;
+++  ctas: string[];
+++  showImage: boolean;
+++  isDefault: boolean;
+++}
+++
+++const TOKENS = ['{TITULO}', '{PRECO}', '{PRECO_ANTIGO}', '{LINK}', '{CUPOM}'];
+++
+++const rascunhoVazio = {
+++  name: '',
+++  body: '',
+++  ctas: [] as string[],
+++  showImage: true,
+++  isDefault: false,
+++};
+++
+++export function Templates() {
+++  const [templates, setTemplates] = useState<Template[]>([]);
+++  const [editando, setEditando] = useState<string | 'novo' | null>(null);
+++  const [rascunho, setRascunho] = useState(rascunhoVazio);
+++  const [novoCta, setNovoCta] = useState('');
+++  const [preview, setPreview] = useState('');
+++  const [erro, setErro] = useState<string | null>(null);
+++  const [busy, setBusy] = useState(false);
+++  const textareaRef = useRef<HTMLTextAreaElement>(null);
+++
+++  async function carregar() {
+++    setTemplates(await api.get<Template[]>('/api/templates'));
+++  }
+++
+++  useEffect(() => {
+++    void carregar().catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar.'));
+++  }, []);
+++
+++  // Pré-visualização acompanha o rascunho, com um pequeno atraso pra não bater na API a cada tecla.
+++  useEffect(() => {
+++    if (!editando) return;
+++    const t = setTimeout(() => {
+++      api
+++        .post<{ text: string }>('/api/templates/preview', { body: rascunho.body, ctas: rascunho.ctas })
+++        .then((r) => setPreview(r.text))
+++        .catch(() => setPreview(''));
+++    }, 300);
+++    return () => clearTimeout(t);
+++  }, [editando, rascunho.body, rascunho.ctas]);
+++
+++  function abrirNovo() {
+++    setRascunho(rascunhoVazio);
+++    setEditando('novo');
+++    setErro(null);
+++  }
+++
+++  function abrirEdicao(t: Template) {
+++    setRascunho({ name: t.name, body: t.body, ctas: [...t.ctas], showImage: t.showImage, isDefault: t.isDefault });
+++    setEditando(t.id);
+++    setErro(null);
+++  }
+++
+++  function inserirToken(token: string) {
+++    const el = textareaRef.current;
+++    if (!el) {
+++      setRascunho((r) => ({ ...r, body: r.body + token }));
+++      return;
+++    }
+++    const inicio = el.selectionStart ?? el.value.length;
+++    const fim = el.selectionEnd ?? el.value.length;
+++    const novoBody = rascunho.body.slice(0, inicio) + token + rascunho.body.slice(fim);
+++    setRascunho((r) => ({ ...r, body: novoBody }));
+++    requestAnimationFrame(() => {
+++      el.focus();
+++      el.selectionStart = el.selectionEnd = inicio + token.length;
+++    });
+++  }
+++
+++  function adicionarCta() {
+++    const texto = novoCta.trim();
+++    if (!texto) return;
+++    setRascunho((r) => ({ ...r, ctas: [...r.ctas, texto] }));
+++    setNovoCta('');
+++  }
+++
+++  function removerCta(i: number) {
+++    setRascunho((r) => ({ ...r, ctas: r.ctas.filter((_, idx) => idx !== i) }));
+++  }
+++
+++  async function salvar() {
+++    if (rascunho.name.trim().length < 2) return setErro('O nome precisa de pelo menos 2 letras.');
+++    if (!rascunho.body.trim()) return setErro('O texto não pode ficar vazio.');
+++
+++    setBusy(true);
+++    setErro(null);
+++    try {
+++      const corpo = {
+++        name: rascunho.name.trim(),
+++        body: rascunho.body,
+++        ctas: rascunho.ctas,
+++        showImage: rascunho.showImage,
+++        isDefault: rascunho.isDefault,
+++      };
+++      if (editando === 'novo') await api.post('/api/templates', corpo);
+++      else await api.put(`/api/templates/${editando}`, corpo);
+++      setEditando(null);
+++      await carregar();
+++    } catch (err) {
+++      setErro(err instanceof Error ? err.message : 'Não consegui salvar.');
+++    } finally {
+++      setBusy(false);
+++    }
+++  }
+++
+++  async function excluir(id: string) {
+++    if (!confirm('Apagar esse modelo?')) return;
+++    await api.del(`/api/templates/${id}`);
+++    await carregar();
+++  }
+++
+++  async function marcarPadrao(t: Template) {
+++    await api.put(`/api/templates/${t.id}`, {
+++      name: t.name,
+++      body: t.body,
+++      ctas: t.ctas,
+++      showImage: t.showImage,
+++      isDefault: true,
+++    });
+++    await carregar();
+++  }
+++
+++  return (
+++    <>
+++      <div className="head">
+++        <div>
+++          <h1>Modelos de mensagem</h1>
+++          <p>
+++            Textos reutilizáveis pros disparos em grupo: escreva uma vez com os tokens do produto no lugar certo
+++            e deixe um pool de chamadas finais pra fechar a mensagem — uma sorteada a cada envio, pra não repetir
+++            sempre a mesma linha.
+++          </p>
+++        </div>
+++        <button className="btn" onClick={abrirNovo}>
+++          Novo modelo
+++        </button>
+++      </div>
+++
+++      {erro && <div className="notice">{erro}</div>}
+++
+++      {editando && (
+++        <div className="panel">
+++          <h2 className="panel__title">{editando === 'novo' ? 'Novo modelo' : 'Editando modelo'}</h2>
+++
+++          <div className="row" style={{ marginBottom: 14 }}>
+++            <div className="field" style={{ flex: '2 1 260px' }}>
+++              <label htmlFor="nome">Nome</label>
+++              <input
+++                id="nome"
+++                value={rascunho.name}
+++                placeholder="Direto e agressivo"
+++                onChange={(e) => setRascunho((r) => ({ ...r, name: e.target.value }))}
+++              />
+++            </div>
+++            <label
+++              className="field"
+++              style={{ flex: '0 1 140px', flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 22 }}
+++            >
+++              <input
+++                type="checkbox"
+++                checked={rascunho.showImage}
+++                onChange={(e) => setRascunho((r) => ({ ...r, showImage: e.target.checked }))}
+++              />
+++              <span>Anexar foto</span>
+++            </label>
+++            <label
+++              className="field"
+++              style={{ flex: '0 1 140px', flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 22 }}
+++            >
+++              <input
+++                type="checkbox"
+++                checked={rascunho.isDefault}
+++                onChange={(e) => setRascunho((r) => ({ ...r, isDefault: e.target.checked }))}
+++              />
+++              <span>Padrão</span>
+++            </label>
+++          </div>
+++
+++          <div className="field" style={{ marginBottom: 8 }}>
+++            <label>Inserir no texto</label>
+++            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+++              {TOKENS.map((tok) => (
+++                <button
+++                  type="button"
+++                  key={tok}
+++                  className="chip"
+++                  style={{ cursor: 'pointer', background: 'none' }}
+++                  onClick={() => inserirToken(tok)}
+++                >
+++                  {tok}
+++                </button>
+++              ))}
+++            </div>
+++          </div>
+++
+++          <div className="split">
+++            <div className="field">
+++              <label htmlFor="body">Texto</label>
+++              <textarea
+++                id="body"
+++                ref={textareaRef}
+++                rows={12}
+++                value={rascunho.body}
+++                onChange={(e) => setRascunho((r) => ({ ...r, body: e.target.value }))}
+++              />
+++            </div>
+++            <div className="field">
+++              <label>Pré-visualização (dados de exemplo)</label>
+++              <div className="notice" style={{ whiteSpace: 'pre-wrap', fontFamily: 'var(--mono)', fontSize: 13 }}>
+++                {preview || 'Escreva o texto pra ver o resultado aqui.'}
+++              </div>
+++            </div>
+++          </div>
+++
+++          <div className="field" style={{ marginTop: 14, marginBottom: 14 }}>
+++            <label>Chamadas finais (CTA)</label>
+++            <small style={{ display: 'block', marginBottom: 6 }}>
+++              Uma é sorteada por envio, pra não repetir sempre a mesma linha. Pool vazio: nenhuma chamada entra
+++              no texto.
+++            </small>
+++            <div className="row">
+++              <div className="field" style={{ flex: '1 1 260px' }}>
+++                <input
+++                  value={novoCta}
+++                  placeholder="Corre que acaba rápido!"
+++                  onChange={(e) => setNovoCta(e.target.value)}
+++                  onKeyDown={(e) => {
+++                    if (e.key === 'Enter') {
+++                      e.preventDefault();
+++                      adicionarCta();
+++                    }
+++                  }}
+++                />
+++              </div>
+++              <button type="button" className="btn btn--ghost" onClick={adicionarCta}>
+++                Adicionar
+++              </button>
+++            </div>
+++            {rascunho.ctas.length > 0 && (
+++              <div className="taglist" style={{ marginTop: 8 }}>
+++                {rascunho.ctas.map((c, i) => (
+++                  <span className="taglist__item" key={i}>
+++                    {c}
+++                    <button
+++                      type="button"
+++                      onClick={() => removerCta(i)}
+++                      aria-label={`Remover chamada "${c}"`}
+++                      style={{
+++                        marginLeft: 6,
+++                        border: 'none',
+++                        background: 'none',
+++                        cursor: 'pointer',
+++                        color: 'var(--muted)',
+++                        fontWeight: 700,
+++                      }}
+++                    >
+++                      ×
+++                    </button>
+++                  </span>
+++                ))}
+++              </div>
+++            )}
+++          </div>
+++
+++          <div style={{ display: 'flex', gap: 8 }}>
+++            <button className="btn" disabled={busy} onClick={() => void salvar()}>
+++              {busy ? 'Salvando...' : 'Salvar'}
+++            </button>
+++            <button className="btn btn--ghost" onClick={() => setEditando(null)}>
+++              Cancelar
+++            </button>
+++          </div>
+++        </div>
+++      )}
+++
+++      {templates.length === 0 && !editando && (
+++        <div className="empty">
+++          <strong>Nenhum modelo criado</strong>
+++          Clique em "Novo modelo" pra montar o texto que os disparos vão usar.
+++        </div>
+++      )}
+++
+++      {templates.map((t) => (
+++        <div key={t.id} className="panel" style={{ marginBottom: 12 }}>
+++          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+++            <div>
+++              <h2 className="panel__title" style={{ marginBottom: 4 }}>
+++                {t.name}
+++                {t.isDefault && (
+++                  <span className="chip" data-tone="on" style={{ marginLeft: 8 }}>
+++                    padrão
+++                  </span>
+++                )}
+++                {!t.showImage && (
+++                  <span className="chip" style={{ marginLeft: 8 }}>
+++                    sem foto
+++                  </span>
+++                )}
+++              </h2>
+++              <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
+++                {t.ctas.length} chamada{t.ctas.length === 1 ? '' : 's'} no pool
+++              </p>
+++            </div>
+++            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+++              {!t.isDefault && (
+++                <button className="btn btn--ghost btn--sm" onClick={() => void marcarPadrao(t)}>
+++                  Tornar padrão
+++                </button>
+++              )}
+++              <button className="btn btn--ghost btn--sm" onClick={() => abrirEdicao(t)}>
+++                Editar
+++              </button>
+++              <button className="btn btn--ghost btn--sm" onClick={() => void excluir(t.id)}>
+++                Excluir
+++              </button>
+++            </div>
+++          </div>
+++        </div>
+++      ))}
+++    </>
+++  );
+++}
+diff --git a/.superpowers/reviews/visao-geral.diff b/.superpowers/reviews/visao-geral.diff
+new file mode 100644
+index 0000000..9d7708c
+--- /dev/null
++++ b/.superpowers/reviews/visao-geral.diff
+@@ -0,0 +1,196 @@
++6063df0 feat(web): nova página Visão Geral como rota raiz, Fila move pra /fila
++32eee90 docs: plano de retomada pra amanhã (dark mode ok, visão geral em andamento)
++---
++ .superpowers/overnight-progress.md |  49 +++++++++++
++ RESUME-AMANHA.md                   | 169 +++++++++++++++++++++++++++++++++++++
++ apps/web/src/App.tsx               |   4 +-
++ apps/web/src/components/Layout.tsx |   5 +-
++ apps/web/src/pages/VisaoGeral.tsx  |  86 +++++++++++++++++++
++ 5 files changed, 310 insertions(+), 3 deletions(-)
++---
++diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
++index 62f5258..8a3ec72 100644
++--- a/apps/web/src/App.tsx
+++++ b/apps/web/src/App.tsx
++@@ -1,15 +1,16 @@
++ import { useEffect, useState } from 'react';
++ import { Route, Routes } from 'react-router-dom';
++ import { api } from './api.js';
++ import { Layout } from './components/Layout.js';
++ import { Logo } from './components/Logo.js';
+++import { VisaoGeral } from './pages/VisaoGeral.js';
++ import { Fila } from './pages/Fila.js';
++ import { Desempenho } from './pages/Desempenho.js';
++ import { Nichos } from './pages/Nichos.js';
++ import { Produtos } from './pages/Produtos.js';
++ import { Agenda } from './pages/Agenda.js';
++ import { Automacoes } from './pages/Automacoes.js';
++ import { Conexoes } from './pages/Conexoes.js';
++ 
++ function Login({ onIn }: { onIn: () => void }) {
++   const [password, setPassword] = useState('');
++@@ -71,21 +72,22 @@ export default function App() {
++       .then((r) => setAuth(r.authenticated))
++       .catch(() => setAuth(false));
++   }, []);
++ 
++   if (auth === null) return null;
++   if (!auth) return <Login onIn={() => setAuth(true)} />;
++ 
++   return (
++     <Layout>
++       <Routes>
++-        <Route path="/" element={<Fila />} />
+++        <Route path="/" element={<VisaoGeral />} />
+++        <Route path="/fila" element={<Fila />} />
++         <Route path="/desempenho" element={<Desempenho />} />
++         <Route path="/produtos" element={<Produtos />} />
++         <Route path="/nichos" element={<Nichos />} />
++         <Route path="/agenda" element={<Agenda />} />
++         <Route path="/automacoes" element={<Automacoes />} />
++         <Route path="/conexoes" element={<Conexoes />} />
++       </Routes>
++     </Layout>
++   );
++ }
++diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
++index 6e5e391..0432878 100644
++--- a/apps/web/src/components/Layout.tsx
+++++ b/apps/web/src/components/Layout.tsx
++@@ -1,19 +1,20 @@
++ import { NavLink, useLocation } from 'react-router-dom';
++ import { useEffect, useState } from 'react';
++ import { api } from '../api.js';
++ import { Logo } from './Logo.js';
++ 
++ type NavLinkDef = { to: string; label: string; end?: boolean };
++ 
++ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
++-  { label: null, items: [{ to: '/', label: 'Fila', end: true }] },
+++  { label: null, items: [{ to: '/', label: 'Visão geral', end: true }] },
+++  { label: null, items: [{ to: '/fila', label: 'Fila' }] },
++   {
++     label: 'Catálogo',
++     items: [
++       { to: '/nichos', label: 'Nichos' },
++       { to: '/produtos', label: 'Preços vigiados' },
++     ],
++   },
++   {
++     label: 'Automação',
++     items: [
++@@ -47,21 +48,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
++           </div>
++         </div>
++ 
++         <nav className="rail__nav">
++           {GROUPS.map((g, gi) => (
++             <div className="rail__group" key={gi}>
++               {g.label && <div className="rail__group-label">{g.label}</div>}
++               {g.items.map((l) => (
++                 <NavLink key={l.to} to={l.to} end={l.end} className="rail__link">
++                   {l.label}
++-                  {l.to === '/' && pending > 0 && <span className="rail__count">{pending}</span>}
+++                  {l.to === '/fila' && pending > 0 && <span className="rail__count">{pending}</span>}
++                 </NavLink>
++               ))}
++             </div>
++           ))}
++         </nav>
++ 
++         <div className="rail__foot">
++           <div className="rail__user">
++             <div className="rail__user__row">
++               <span className="rail__user__status">
++diff --git a/apps/web/src/pages/VisaoGeral.tsx b/apps/web/src/pages/VisaoGeral.tsx
++new file mode 100644
++index 0000000..ca95cd0
++--- /dev/null
+++++ b/apps/web/src/pages/VisaoGeral.tsx
++@@ -0,0 +1,86 @@
+++import { useEffect, useState } from 'react';
+++import { Link } from 'react-router-dom';
+++import { api, int } from '../api.js';
+++
+++interface Overview {
+++  sent: { value: number };
+++  clicks: { value: number };
+++  pending: number;
+++}
+++
+++function Kpi({ label, value }: { label: string; value: string }) {
+++  return (
+++    <div className="kpi">
+++      <div className="kpi__label">{label}</div>
+++      <div className="kpi__value">{value}</div>
+++    </div>
+++  );
+++}
+++
+++export function VisaoGeral() {
+++  const [overview, setOverview] = useState<Overview | null>(null);
+++  const [groups, setGroups] = useState<number | null>(null);
+++
+++  useEffect(() => {
+++    api.get<Overview>('/api/stats/overview?days=1').then(setOverview).catch(() => {});
+++    api
+++      .get<any>('/api/whatsapp/status')
+++      .then((s) => setGroups(s.groups.length))
+++      .catch(() => {});
+++  }, []);
+++
+++  return (
+++    <>
+++      <div className="head">
+++        <div>
+++          <h1>Visão geral</h1>
+++          <p>Um retrato rápido do que está na fila e do que saiu hoje. Pra métrica de verdade, veja Desempenho.</p>
+++        </div>
+++      </div>
+++
+++      <div className="panel panel--hero">
+++        <h2 className="panel__title">Capturar oferta</h2>
+++        <p>Cole um link ou busque nas lojas conectadas — a fila é onde você decide manda ou pula.</p>
+++        <Link className="btn" to="/fila">
+++          Ir para a fila
+++        </Link>
+++      </div>
+++
+++      <div className="panel">
+++        <div className="kpi__label">Ofertas esperando revisão</div>
+++        <div className="kpi__value">{overview ? int(overview.pending) : '—'}</div>
+++        <p style={{ marginTop: 8 }}>
+++          <Link to="/fila">Ver fila →</Link>
+++        </p>
+++      </div>
+++
+++      <div style={{ height: 20 }} />
+++
+++      <div className="grid-kpi">
+++        <Kpi label="Ofertas na fila" value={overview ? int(overview.pending) : '—'} />
+++        <Kpi label="Cliques" value={overview ? int(overview.clicks.value) : '—'} />
+++        <Kpi label="Enviadas hoje" value={overview ? int(overview.sent.value) : '—'} />
+++        <Kpi label="Grupos ativos" value={groups === null ? '—' : int(groups)} />
+++      </div>
+++
+++      <div className="panel">
+++        <h2 className="panel__title">Disparos</h2>
+++        <div className="empty">
+++          <strong>Disparos ainda não existe</strong>
+++          Em breve.
+++        </div>
+++      </div>
+++
+++      <div className="split">
+++        <div className="panel">
+++          <h2 className="panel__title">Ranking de conversão</h2>
+++          <p>Ainda não construído — vai mostrar quais grupos convertem melhor.</p>
+++        </div>
+++        <div className="panel">
+++          <h2 className="panel__title">Melhores horários para disparar</h2>
+++          <p>Ainda não construído — vai apontar os horários com mais clique.</p>
+++        </div>
+++      </div>
+++    </>
+++  );
+++}
+diff --git a/.superpowers/visao-geral-report.md b/.superpowers/visao-geral-report.md
+new file mode 100644
+index 0000000..5197bd2
+--- /dev/null
++++ b/.superpowers/visao-geral-report.md
+@@ -0,0 +1,42 @@
++# Visão Geral — report
++
++## What was implemented
++
++1. **Routing** (`apps/web/src/App.tsx`): imported `VisaoGeral`, routed it at `/`, moved the existing `<Route path="/" element={<Fila />} />` to `/fila`.
++2. **Nav** (`apps/web/src/components/Layout.tsx`): split the first `GROUPS` entry into two ungrouped entries — `Visão geral` → `/` (with `end: true`) and `Fila` → `/fila` (no `end`, non-exact match is fine for a leaf route). Updated the pending-count badge condition from `l.to === '/'` to `l.to === '/fila'`.
++3. **New page** (`apps/web/src/pages/VisaoGeral.tsx`):
++   - `.head` block: `<h1>Visão geral</h1>` + one-line subtitle.
++   - `.panel.panel--hero` CTA: title "Capturar oferta", honest copy about pasting/searching, `<Link className="btn" to="/fila">Ir para a fila</Link>`.
++   - Small stat panel (`.panel` reusing `.kpi__label`/`.kpi__value`) showing `overview.pending` with a `Link` to `/fila`.
++   - `.grid-kpi` row with 4 `.kpi` cards (no delta): Ofertas na fila (pending), Cliques (clicks.value), Enviadas hoje (sent.value), Grupos ativos (whatsapp `groups.length`).
++   - Disparos panel: honest `.empty` state, "Disparos ainda não existe / Em breve."
++   - `.split` with two `.panel`s: "Ranking de conversão" and "Melhores horários para disparar", each one honest sentence saying it's not built yet.
++   - Data fetched on mount via `useEffect`: `api.get<Overview>('/api/stats/overview?days=1')` and `api.get<any>('/api/whatsapp/status')` (same untyped pattern `Layout.tsx` already uses for this endpoint).
++
++## Typecheck / build result
++
++`npm run build --workspace=apps/web` → exit 0. `tsc -b` passed with no errors, `vite build` produced `dist/` output cleanly (48 modules, no warnings besides normal Vite output).
++
++## Files changed
++
++- `apps/web/src/App.tsx` — diff is exactly the `VisaoGeral` import + the two `<Route>` line changes described. Nothing else touched.
++- `apps/web/src/components/Layout.tsx` — diff is exactly the `GROUPS` array split into two entries + the badge condition (`l.to === '/'` → `l.to === '/fila'`). Nothing else touched.
++- `apps/web/src/pages/VisaoGeral.tsx` — new file, ~85 lines.
++
++Confirmed via `git diff` before commit: no incidental changes crept into App.tsx/Layout.tsx.
++
++## Self-review findings
++
++- Verified `/api/stats/overview` response shape directly in `apps/api/src/routes/stats.ts`: returns `{ days, sent:{value,previous}, clicks:{value,previous}, orders:{...}, revenue:{...}, gmv, clicksPerOffer, conversionRate, pending, queued }`. `pending`/`queued` come from unconditional `prisma.offer.count({where:{status:...}})` calls — not scoped by the `since`/`days` window — confirming `days=1` is safe to use for a same-day dashboard while still narrowing `sent`/`clicks`.
++- Verified `/api/whatsapp/status` in `apps/api/src/routes/whatsapp.ts`: returns `{ status, qr, me, quota, groups }` where `groups = await prisma.whatsappGroup.findMany(...)` — a plain array, so `.groups.length` is correct and matches the `api.get<any>(...)` pattern already used for this same endpoint in `Layout.tsx`.
++- Declared a minimal local `Overview` interface in `VisaoGeral.tsx` (`sent.value`, `clicks.value`, `pending`) rather than duplicating Desempenho's full interface — only what the page actually reads, using real field names confirmed against the route source, not guessed.
++- Every link/button on the page resolves to a real route: hero button → `/fila`, stat panel link → `/fila`. No link points at a "Garimpar" page or any unbuilt feature.
++- No `.kpi__delta` used anywhere on this page (correctly omitted per spec — no meaningful "previous period" for a same-day dashboard).
++- No new top-level CSS classes were added — page reuses `.head`, `.panel`, `.panel--hero`, `.panel__title`, `.grid-kpi`, `.kpi`/`.kpi__label`/`.kpi__value`, `.empty`, `.split`, `.btn` verbatim from `styles.css`.
++- Spacing follows existing conventions rather than inventing new CSS: `.panel + .panel` (built-in adjacent-sibling margin) handles hero→stat-panel spacing; a `<div style={{ height: 20 }} />` spacer (same pattern `Fila.tsx` uses between its hero panel and the tabs row) separates the stat panel from `.grid-kpi`; `.grid-kpi`'s existing `margin-bottom: 16px` and `.split`'s existing `margin-top: 18px` handle the rest — no manual spacers needed there, matching how `Desempenho.tsx` chains `.grid-kpi` directly into a `.panel`.
++- No unused imports; no dead code. `Link` from `react-router-dom` is a new import in this file (first page in the codebase to use it directly, though `NavLink`/`Routes`/`Route` were already used elsewhere) — standard react-router-dom API, no new dependency.
++- Both fetches are independently guarded with `.catch(() => {})`, matching the fire-and-forget error-swallowing pattern already used for the same two calls in `Layout.tsx`.
++
++## Concerns
++
++None. The `pending` count intentionally appears twice on the page (once in the highlighted stat panel, once inside the `.grid-kpi` row) — this is explicitly what the design asked for, not a mistake.
+diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
+index b61e37b..c3bb592 100644
+--- a/apps/api/prisma/schema.prisma
++++ b/apps/api/prisma/schema.prisma
+@@ -11,21 +11,22 @@ enum Platform {
+   AMAZON
+   MERCADO_LIVRE
+   SHOPEE
+   ALIEXPRESS
+   AWIN
+   LOMADEE
+ }
+ 
+ enum OfferStatus {
+   PENDING // esperando sua analise na fila
+-  QUEUED // aprovada, aguardando horario
++  QUEUED // aprovada, aguardando horario (Agenda)
++  DISPATCHING // reservada por um Disparo -- fora da fila ate ele terminar ou ser cancelado
+   SENT
+   SKIPPED
+   FAILED
+ }
+ 
+ enum OfferSource {
+   MANUAL // voce colou o link
+   WATCHLIST // caiu de preco em um produto vigiado
+   DISCOVERY // garimpo automatico
+ }
+@@ -114,20 +115,21 @@ model Offer {
+   failReason   String?
+   groupJid     String?
+ 
+   createdAt DateTime @default(now())
+   updatedAt DateTime @updatedAt
+ 
+   product     Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+   niche       Niche?       @relation(fields: [nicheId], references: [id], onDelete: SetNull)
+   shortLink   ShortLink?
+   conversions Conversion[]
++  disparoItems DisparoItem[]
+ 
+   @@index([status, score])
+   @@index([nicheId, status])
+   @@index([createdAt])
+ }
+ 
+ model ShortLink {
+   id        String   @id @default(cuid())
+   code      String   @unique
+   targetUrl String
+@@ -331,18 +333,91 @@ model WhatsappGroup {
+ /// alimentar a futura tela de Disparos.
+ model MessageTemplate {
+   id        String   @id @default(cuid())
+   name      String   @unique
+   body      String
+   ctas      String[] @default([])
+   showImage Boolean  @default(true)
+   isDefault Boolean  @default(false)
+   createdAt DateTime @default(now())
+   updatedAt DateTime @updatedAt
++
++  disparos Disparo[]
++}
++
++enum DisparoStatus {
++  DRAFT // criado, aguardando a hora de comecar (imediato ja nasce SENDING)
++  SENDING // o worker ja tocou em algum item -- em andamento
++  DONE // todos os itens resolvidos (enviado ou falhou)
++  CANCELLED
++}
++
++enum DisparoItemStatus {
++  PENDING
++  SENT
++  FAILED
++}
++
++/// Disparo manual em massa: um lote de ofertas x grupos, espacado no tempo.
++/// Ao criar, as ofertas escolhidas saem da fila (Offer.status vira
++/// DISPATCHING) pra nao serem pegas de novo pela curadoria manual nem por
++/// automacoes enquanto o disparo esta rodando. Ver services/disparo.ts.
++model Disparo {
++  id     String        @id @default(cuid())
++  status DisparoStatus @default(DRAFT)
++
++  templateId String
++  template   MessageTemplate @relation(fields: [templateId], references: [id])
++
++  /// Grupos de destino -- toda oferta do disparo vai pra cada um deles, um
++  /// DisparoItem por par (oferta, grupo).
++  groupJids String[]
++
++  /// Quando o primeiro envio deve sair. "Agora" grava o instante da criacao.
++  startAt DateTime
++  /// Espaco entre um envio e o proximo, em minutos. Piso de 5 (Zod na rota).
++  intervalMinutes Int
++
++  /// Guardas de seguranca: envio que caia dentro da janela e adiado, nunca
++  /// pulado ou mandado do mesmo jeito. Fuso America/Sao_Paulo.
++  avoidNightHours Boolean @default(true) // nao manda 23h-06h
++  avoidWeekends   Boolean @default(false) // nao manda sabado/domingo
++  /// Guardado mas sem efeito por enquanto: o dono ainda nao decidiu como
++  /// detectar oferta expirada. O worker le esse campo e ignora -- existe so
++  /// pra nao perder a escolha do usuario quando a checagem for implementada.
++  skipExpiredOffers Boolean @default(false)
++
++  createdAt   DateTime  @default(now())
++  updatedAt   DateTime  @updatedAt
++  cancelledAt DateTime?
++
++  items DisparoItem[]
++
++  @@index([status])
++}
++
++/// Um envio dentro de um disparo: um par (oferta, grupo). E o que da pra
++/// contar progresso ("8 ofertas x 2 grupos = 16 envios, 3 feitos") e pro
++/// worker achar o proximo que vence.
++model DisparoItem {
++  id        String            @id @default(cuid())
++  disparoId String
++  disparo   Disparo           @relation(fields: [disparoId], references: [id], onDelete: Cascade)
++  offerId   String
++  offer     Offer             @relation(fields: [offerId], references: [id])
++  groupJid  String
++  status    DisparoItemStatus @default(PENDING)
++
++  scheduledFor DateTime
++  sentAt       DateTime?
++  failReason   String?
++
++  @@index([status, scheduledFor])
++  @@index([disparoId])
+ }
+ 
+ /// Contador diario de envios, pra respeitar o teto e nao queimar o numero.
+ model SendLog {
+   id     String   @id @default(cuid())
+   day    String   @unique
+   count  Int      @default(0)
+ }
+diff --git a/apps/api/src/routes/disparos.ts b/apps/api/src/routes/disparos.ts
+new file mode 100644
+index 0000000..a551ea6
+--- /dev/null
++++ b/apps/api/src/routes/disparos.ts
+@@ -0,0 +1,106 @@
++import type { FastifyInstance } from 'fastify';
++import { z } from 'zod';
++import { prisma } from '../db.js';
++import { criarDisparo, cancelarDisparo } from '../services/disparo.js';
++
++const corpoDisparo = z
++  .object({
++    offerIds: z.array(z.string().min(1)).min(1, 'Escolha ao menos uma oferta.'),
++    templateId: z.string().min(1, 'Escolha um modelo de mensagem.'),
++    groupJids: z.array(z.string().min(1)).min(1, 'Escolha ao menos um grupo de destino.'),
++    startNow: z.boolean(),
++    scheduledFor: z.string().datetime().optional(),
++    // Piso de 5min e regra de negocio, nao so de UI -- e o que impede um
++    // disparo de virar rajada mesmo se alguem forcar a chamada da API.
++    intervalMinutes: z.number().int().min(5, 'O intervalo minimo e 5 minutos.'),
++    avoidNightHours: z.boolean().default(true),
++    avoidWeekends: z.boolean().default(false),
++    skipExpiredOffers: z.boolean().default(false),
++  })
++  .refine((b) => b.startNow || b.scheduledFor, {
++    message: 'Escolha "Agora" ou uma data para agendar.',
++    path: ['scheduledFor'],
++  });
++
++function progresso(items: { status: string }[]) {
++  const total = items.length;
++  const enviados = items.filter((i) => i.status === 'SENT').length;
++  const falharam = items.filter((i) => i.status === 'FAILED').length;
++  return { total, enviados, falharam, pendentes: total - enviados - falharam };
++}
++
++/** Ultimo horario ainda pendente -- serve de estimativa de termino. */
++function estimativaFim(items: { status: string; scheduledFor: Date }[]) {
++  const pendentes = items.filter((i) => i.status === 'PENDING');
++  if (!pendentes.length) return null;
++  return pendentes.reduce((max, i) => (i.scheduledFor > max ? i.scheduledFor : max), pendentes[0].scheduledFor);
++}
++
++const serialize = (d: any) => ({
++  id: d.id,
++  status: d.status,
++  templateId: d.templateId,
++  templateName: d.template?.name ?? null,
++  groupJids: d.groupJids,
++  startAt: d.startAt,
++  intervalMinutes: d.intervalMinutes,
++  avoidNightHours: d.avoidNightHours,
++  avoidWeekends: d.avoidWeekends,
++  skipExpiredOffers: d.skipExpiredOffers,
++  createdAt: d.createdAt,
++  cancelledAt: d.cancelledAt,
++  ...progresso(d.items),
++  estimatedFinish: estimativaFim(d.items),
++});
++
++const serializeItem = (i: any) => ({
++  id: i.id,
++  offerId: i.offerId,
++  offerTitle: i.offer?.product?.title ?? null,
++  groupJid: i.groupJid,
++  status: i.status,
++  scheduledFor: i.scheduledFor,
++  sentAt: i.sentAt,
++  failReason: i.failReason,
++});
++
++export async function disparoRoutes(app: FastifyInstance) {
++  app.get('/api/disparos', async () => {
++    const disparos = await prisma.disparo.findMany({
++      orderBy: { createdAt: 'desc' },
++      include: { template: true, items: true },
++    });
++    return disparos.map(serialize);
++  });
++
++  app.get<{ Params: { id: string } }>('/api/disparos/:id', async (req, reply) => {
++    const disparo = await prisma.disparo.findUnique({
++      where: { id: req.params.id },
++      include: {
++        template: true,
++        items: { include: { offer: { include: { product: true } } }, orderBy: { scheduledFor: 'asc' } },
++      },
++    });
++    if (!disparo) return reply.code(404).send({ error: 'Disparo nao encontrado.' });
++    return { ...serialize(disparo), items: disparo.items.map(serializeItem) };
++  });
++
++  app.post('/api/disparos', async (req, reply) => {
++    const body = corpoDisparo.parse(req.body);
++    try {
++      const disparo = await criarDisparo(body);
++      return reply.code(201).send(serialize(disparo));
++    } catch (err) {
++      return reply.code(400).send({ error: err instanceof Error ? err.message : 'Falha ao criar o disparo.' });
++    }
++  });
++
++  app.post<{ Params: { id: string } }>('/api/disparos/:id/cancelar', async (req, reply) => {
++    try {
++      await cancelarDisparo(req.params.id);
++      return { ok: true };
++    } catch (err) {
++      return reply.code(400).send({ error: err instanceof Error ? err.message : 'Falha ao cancelar.' });
++    }
++  });
++}
+diff --git a/apps/api/src/routes/extensao.ts b/apps/api/src/routes/extensao.ts
+index 2a77ef5..cc96a8b 100644
+--- a/apps/api/src/routes/extensao.ts
++++ b/apps/api/src/routes/extensao.ts
+@@ -112,21 +112,25 @@ export async function extensaoRoutes(app: FastifyInstance) {
+       const resultado = { recebidos: produtos.length, criados: 0, repetidos: 0, falhas: [] as string[] };
+ 
+       for (const bruto of produtos) {
+         try {
+           // Ja existe oferta aberta desse produto? Nao duplica.
+           const jaTem = await prisma.product.findUnique({
+             where: {
+               platform_externalId: { platform: bruto.platform, externalId: bruto.externalId },
+             },
+             include: {
+-              offers: { where: { status: { in: ['PENDING', 'QUEUED'] } }, take: 1 },
++              // DISPATCHING entra pra nao recapturar um produto que esta no
++              // meio de um Disparo (a oferta ainda nao saiu, so ja foi
++              // reservada) -- sem isso a extensao criava uma segunda oferta
++              // pro mesmo produto enquanto o disparo estava rodando.
++              offers: { where: { status: { in: ['PENDING', 'QUEUED', 'DISPATCHING'] } }, take: 1 },
+             },
+           });
+           if (jaTem?.offers.length) {
+             resultado.repetidos++;
+             continue;
+           }
+ 
+           await ingestProduct(normalizar(bruto), OfferSource.MANUAL, {
+             // O meli.la do painel tem precedencia: e o unico link do ML que
+             // atribui comissao de verdade. Sem ele o connector monta um com
+diff --git a/apps/api/src/server.ts b/apps/api/src/server.ts
+index f4a736d..ea6555a 100644
+--- a/apps/api/src/server.ts
++++ b/apps/api/src/server.ts
+@@ -1,20 +1,21 @@
+ import cookie from '@fastify/cookie';
+ import cors from '@fastify/cors';
+ import Fastify from 'fastify';
+ import { ZodError } from 'zod';
+ import { env } from './env.js';
+ import { prisma } from './db.js';
+ import { logger } from './lib/logger.js';
+ import { authRoutes, requireAuth } from './plugins/auth.js';
+ import { automacaoRoutes } from './routes/automacoes.js';
+ import { credentialRoutes } from './routes/credentials.js';
++import { disparoRoutes } from './routes/disparos.js';
+ import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
+ import { nichoRoutes } from './routes/nichos.js';
+ import { offerRoutes } from './routes/offers.js';
+ import { redirectRoutes } from './routes/redirect.js';
+ import { statsRoutes } from './routes/stats.js';
+ import { templateRoutes } from './routes/templates.js';
+ import { watchRoutes } from './routes/watch.js';
+ import { whatsappRoutes } from './routes/whatsapp.js';
+ import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
+ import { whatsapp } from './whatsapp/baileys.js';
+@@ -65,20 +66,21 @@ await app.register(authRoutes);
+ 
+ // A extensao autentica por token no header, nao por cookie -- fica fora do
+ // bloco de sessao.
+ await app.register(extensaoRoutes);
+ 
+ // Tudo abaixo exige sessao.
+ await app.register(async (instance) => {
+   instance.addHook('onRequest', requireAuth);
+   await instance.register(automacaoRoutes);
+   await instance.register(credentialRoutes);
++  await instance.register(disparoRoutes);
+   await instance.register(extensaoAdminRoutes);
+   await instance.register(nichoRoutes);
+   await instance.register(offerRoutes);
+   await instance.register(statsRoutes);
+   await instance.register(templateRoutes);
+   await instance.register(watchRoutes);
+   await instance.register(whatsappRoutes);
+ 
+   // Disparo manual dos workers, pra testar sem esperar o cron.
+   // Espera terminar e devolve o resumo: sem isso o clique e indistinguivel de
+diff --git a/apps/api/src/services/disparo.ts b/apps/api/src/services/disparo.ts
+new file mode 100644
+index 0000000..fafb861
+--- /dev/null
++++ b/apps/api/src/services/disparo.ts
+@@ -0,0 +1,270 @@
++import { DisparoStatus, DisparoItemStatus, OfferStatus } from '@prisma/client';
++import { prisma, num } from '../db.js';
++import { logger } from '../lib/logger.js';
++import { sendOffer } from './dispatch.js';
++import { renderTemplate } from './template.js';
++
++const MINUTE_MS = 60_000;
++
++export interface CriarDisparoInput {
++  offerIds: string[];
++  templateId: string;
++  groupJids: string[];
++  startNow: boolean;
++  scheduledFor?: string;
++  intervalMinutes: number;
++  avoidNightHours: boolean;
++  avoidWeekends: boolean;
++  skipExpiredOffers: boolean;
++}
++
++/**
++ * Cria o disparo e ja reserva as ofertas escolhidas (PENDING -> DISPATCHING),
++ * na mesma transacao -- assim elas somem da Fila e de qualquer automacao no
++ * instante em que o disparo existe, nunca antes nem depois.
++ *
++ * Ordem dos envios: pra cada oferta, todos os grupos, na ordem em que as
++ * ofertas e os grupos foram escolhidos. Isso garante que duas mensagens
++ * nunca saem no mesmo instante ("rajada") -- cada par (oferta, grupo) fica
++ * numa fatia de tempo so dele, espacada pelo intervalo configurado.
++ */
++export async function criarDisparo(input: CriarDisparoInput) {
++  const offers = await prisma.offer.findMany({
++    where: { id: { in: input.offerIds }, status: OfferStatus.PENDING },
++  });
++  if (offers.length !== input.offerIds.length) {
++    throw new Error('Alguma oferta escolhida ja nao esta mais pendente -- atualize a lista.');
++  }
++  const template = await prisma.messageTemplate.findUnique({ where: { id: input.templateId } });
++  if (!template) throw new Error('Modelo de mensagem nao encontrado.');
++
++  const porId = new Map(offers.map((o) => [o.id, o]));
++  const ordenadas = input.offerIds.map((id) => porId.get(id)!);
++
++  const startAt = input.startNow ? new Date() : new Date(input.scheduledFor!);
++  const pares = ordenadas.flatMap((o) => input.groupJids.map((groupJid) => ({ offerId: o.id, groupJid })));
++
++  return prisma.$transaction(async (tx) => {
++    const disparo = await tx.disparo.create({
++      data: {
++        status: input.startNow ? DisparoStatus.SENDING : DisparoStatus.DRAFT,
++        templateId: input.templateId,
++        groupJids: input.groupJids,
++        startAt,
++        intervalMinutes: input.intervalMinutes,
++        avoidNightHours: input.avoidNightHours,
++        avoidWeekends: input.avoidWeekends,
++        skipExpiredOffers: input.skipExpiredOffers,
++        items: {
++          create: pares.map((p, i) => ({
++            offerId: p.offerId,
++            groupJid: p.groupJid,
++            scheduledFor: new Date(startAt.getTime() + i * input.intervalMinutes * MINUTE_MS),
++          })),
++        },
++      },
++      include: { items: true, template: true },
++    });
++    await tx.offer.updateMany({
++      where: { id: { in: input.offerIds } },
++      data: { status: OfferStatus.DISPATCHING },
++    });
++    return disparo;
++  });
++}
++
++/**
++ * Cancela o disparo: os itens que ainda nao saíram viram FAILED (com motivo
++ * "Disparo cancelado"), e SO as ofertas que ainda estavam DISPATCHING voltam
++ * pra PENDING (Fila). Uma oferta que ja saiu pra pelo menos um grupo ja
++ * esta SENT (sendOffer marca isso no primeiro envio) -- essa nao volta:
++ * nao da pra desenviar uma mensagem de WhatsApp, e reaparecer na Fila
++ * sugeriria que ela nunca saiu.
++ */
++export async function cancelarDisparo(id: string) {
++  const disparo = await prisma.disparo.findUnique({ where: { id }, include: { items: true } });
++  if (!disparo) throw new Error('Disparo nao encontrado.');
++  if (disparo.status === DisparoStatus.CANCELLED || disparo.status === DisparoStatus.DONE) {
++    throw new Error('Esse disparo ja terminou -- nao da pra cancelar.');
++  }
++
++  const pendentes = disparo.items.filter((i) => i.status === DisparoItemStatus.PENDING);
++  const offerIds = [...new Set(pendentes.map((i) => i.offerId))];
++
++  await prisma.$transaction([
++    prisma.disparoItem.updateMany({
++      where: { disparoId: id, status: DisparoItemStatus.PENDING },
++      data: { status: DisparoItemStatus.FAILED, failReason: 'Disparo cancelado.' },
++    }),
++    prisma.offer.updateMany({
++      where: { id: { in: offerIds }, status: OfferStatus.DISPATCHING },
++      data: { status: OfferStatus.PENDING },
++    }),
++    prisma.disparo.update({
++      where: { id },
++      data: { status: DisparoStatus.CANCELLED, cancelledAt: new Date() },
++    }),
++  ]);
++}
++
++/** Horario (America/Sao_Paulo) ou dia da semana bloqueiam o envio agora? */
++function bloqueado(t: Date, avoidNightHours: boolean, avoidWeekends: boolean): boolean {
++  const partes = new Intl.DateTimeFormat('en-GB', {
++    timeZone: 'America/Sao_Paulo',
++    hourCycle: 'h23',
++    hour: '2-digit',
++    weekday: 'short',
++  }).formatToParts(t);
++  const hora = Number(partes.find((p) => p.type === 'hour')?.value ?? '0');
++  const diaSemana = partes.find((p) => p.type === 'weekday')?.value;
++
++  if (avoidNightHours && (hora >= 23 || hora < 6)) return true;
++  if (avoidWeekends && (diaSemana === 'Sat' || diaSemana === 'Sun')) return true;
++  return false;
++}
++
++/**
++ * Proximo instante liberado, andando minuto a minuto ate sair das janelas
++ * bloqueadas. Pior caso (sexta 23h com as duas guardas ligadas) sao uns
++ * 3300 minutos ate segunda 06h -- calculo puro, sem I/O, nao pesa nem nesse
++ * extremo.
++ */
++function proximoLiberado(de: Date, avoidNightHours: boolean, avoidWeekends: boolean): Date {
++  let t = de;
++  let voltas = 0;
++  while (bloqueado(t, avoidNightHours, avoidWeekends) && voltas < 4 * 24 * 60) {
++    t = new Date(t.getTime() + MINUTE_MS);
++    voltas++;
++  }
++  return t;
++}
++
++/**
++ * Adia este item e todos os que vem depois dele no mesmo disparo (ainda
++ * pendentes), recomecando a contagem do intervalo a partir do proximo
++ * horario liberado.
++ *
++ * Por que a cauda inteira, e nao so este item: se so este item fosse adiado
++ * pro exato instante em que a janela reabre, e os de depois continuassem
++ * com o scheduledFor original (que tambem ja passou, porque a janela
++ * bloqueada emperrou todos igual), TODOS ficariam "vencidos" ao mesmo tempo
++ * -- o worker mandaria todos juntos no primeiro tick apos a janela reabrir.
++ * Isso e exatamente a rajada que o intervalo minimo existe pra evitar.
++ * Recalculando a cauda inteira a partir do novo inicio, o espacamento
++ * configurado se mantem intacto -- so desliza no tempo, nunca comprime.
++ */
++async function adiar(
++  item: { disparoId: string; scheduledFor: Date },
++  disparo: { intervalMinutes: number; avoidNightHours: boolean; avoidWeekends: boolean },
++) {
++  const cauda = await prisma.disparoItem.findMany({
++    where: {
++      disparoId: item.disparoId,
++      status: DisparoItemStatus.PENDING,
++      scheduledFor: { gte: item.scheduledFor },
++    },
++    orderBy: { scheduledFor: 'asc' },
++  });
++  const inicio = proximoLiberado(new Date(), disparo.avoidNightHours, disparo.avoidWeekends);
++
++  await prisma.$transaction(
++    cauda.map((it, i) =>
++      prisma.disparoItem.update({
++        where: { id: it.id },
++        data: { scheduledFor: new Date(inicio.getTime() + i * disparo.intervalMinutes * MINUTE_MS) },
++      }),
++    ),
++  );
++}
++
++function dadosTemplate(offer: {
++  price: unknown;
++  comparePrice: unknown;
++  couponCode: string | null;
++  affiliateUrl: string;
++  product: { title: string };
++}) {
++  return {
++    title: offer.product.title,
++    price: num(offer.price) ?? 0,
++    comparePrice: num(offer.comparePrice),
++    couponCode: offer.couponCode,
++    link: offer.affiliateUrl,
++  };
++}
++
++/**
++ * Roda pelo cron a cada minuto (workers/index.ts). Manda no maximo um item
++ * por disparo por rodada -- o espacamento entre os proximos ja vem certo no
++ * scheduledFor calculado na criacao (ou reajustado por adiar()), entao nao
++ * precisa mandar mais de um por vez pra respeitar o intervalo.
++ *
++ * Reentrancia: trava em memoria de processo unico (`rodando`). sendOffer em
++ * si ja serializa qualquer envio real por baixo (whatsapp/baileys.ts usa um
++ * lock proprio), mas sem essa trava aqui duas rodadas do cron sobrepostas
++ * poderiam ler o MESMO item PENDING antes de qualquer uma marca-lo SENT, e
++ * as duas chamariam sendOffer pro mesmo par (oferta, grupo) -- mensagem
++ * duplicada. So funciona com uma instancia da API rodando, que e o caso
++ * hoje; com mais de um processo precisaria de lock no banco.
++ */
++let rodando = false;
++export async function runDisparos() {
++  if (rodando) return;
++  rodando = true;
++  try {
++    const due = await prisma.disparoItem.findMany({
++      where: {
++        status: DisparoItemStatus.PENDING,
++        scheduledFor: { lte: new Date() },
++        disparo: { status: { in: [DisparoStatus.DRAFT, DisparoStatus.SENDING] } },
++      },
++      orderBy: { scheduledFor: 'asc' },
++      take: 5,
++      include: {
++        disparo: { include: { template: true } },
++        offer: { include: { product: true } },
++      },
++    });
++
++    const processados = new Set<string>();
++    for (const item of due) {
++      if (processados.has(item.disparoId)) continue;
++      processados.add(item.disparoId);
++
++      const { disparo } = item;
++      if (disparo.status === DisparoStatus.DRAFT) {
++        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.SENDING } });
++      }
++
++      if (bloqueado(new Date(), disparo.avoidNightHours, disparo.avoidWeekends)) {
++        await adiar(item, disparo);
++        continue;
++      }
++
++      try {
++        const texto = renderTemplate(disparo.template.body, dadosTemplate(item.offer), disparo.template.ctas);
++        await sendOffer(item.offerId, item.groupJid, { message: texto, allowResend: true });
++        await prisma.disparoItem.update({
++          where: { id: item.id },
++          data: { status: DisparoItemStatus.SENT, sentAt: new Date() },
++        });
++      } catch (err) {
++        const failReason = err instanceof Error ? err.message : 'erro desconhecido';
++        logger.error({ disparoId: disparo.id, itemId: item.id, failReason }, 'envio de disparo falhou');
++        await prisma.disparoItem.update({
++          where: { id: item.id },
++          data: { status: DisparoItemStatus.FAILED, failReason },
++        });
++      }
++
++      const restam = await prisma.disparoItem.count({
++        where: { disparoId: disparo.id, status: DisparoItemStatus.PENDING },
++      });
++      if (restam === 0) {
++        await prisma.disparo.update({ where: { id: disparo.id }, data: { status: DisparoStatus.DONE } });
++      }
++    }
++  } finally {
++    rodando = false;
++  }
++}
+diff --git a/apps/api/src/services/dispatch.ts b/apps/api/src/services/dispatch.ts
+index db8ca9c..6ae9439 100644
+--- a/apps/api/src/services/dispatch.ts
++++ b/apps/api/src/services/dispatch.ts
+@@ -6,32 +6,51 @@ import { whatsapp } from '../whatsapp/baileys.js';
+ /** Grupo padrao marcado no dashboard, ou o primeiro sincronizado. */
+ async function defaultGroupJid(): Promise<string> {
+   const group =
+     (await prisma.whatsappGroup.findFirst({ where: { isDefault: true } })) ??
+     (await prisma.whatsappGroup.findFirst());
+   if (!group) throw new Error('Nenhum grupo sincronizado. Conecte o WhatsApp e clique em "Atualizar grupos".');
+   return group.jid;
+ }
+ 
+ /**
+- * Envia a oferta aprovada. Chamado quando voce clica em "Enviar ao grupo"
+- * ou pelo agendador, quando chega a hora marcada.
++ * Envia a oferta aprovada. Chamado quando voce clica em "Enviar ao grupo",
++ * pelo agendador quando chega a hora marcada, ou pelo worker de Disparos.
++ *
++ * `options.message` sobrepoe o texto so nesse envio -- o campo Offer.message
++ * gravado no banco nao muda (ele e do fluxo manual da Fila). E o que o
++ * Disparo usa pra mandar o texto renderizado do template escolhido, com sua
++ * propria CTA sorteada por envio.
++ *
++ * `options.allowResend` pula o guard de "ja foi enviada". Existe porque uma
++ * mesma oferta pode ir pra VARIOS grupos num disparo -- o primeiro envio ja
++ * marca a oferta como SENT, e sem essa saida o segundo grupo cairia no
++ * guard pensando que era reenvio duplicado. So o worker de Disparos usa essa
++ * opcao; o botao "Enviar ao grupo" da Fila e o agendador continuam
++ * bloqueando reenvio normalmente.
+  */
+-export async function sendOffer(offerId: string, groupJid?: string) {
++export async function sendOffer(
++  offerId: string,
++  groupJid?: string,
++  options?: { message?: string; allowResend?: boolean },
++) {
+   const offer = await prisma.offer.findUnique({ where: { id: offerId }, include: { product: true } });
+   if (!offer) throw new Error('Oferta nao encontrada.');
+-  if (offer.status === OfferStatus.SENT) throw new Error('Essa oferta ja foi enviada.');
++  if (offer.status === OfferStatus.SENT && !options?.allowResend) {
++    throw new Error('Essa oferta ja foi enviada.');
++  }
+ 
+   const jid = groupJid ?? offer.groupJid ?? (await defaultGroupJid());
++  const message = options?.message ?? offer.message;
+ 
+   try {
+-    await whatsapp.sendOffer(jid, offer.message, {
++    await whatsapp.sendOffer(jid, message, {
+       title: offer.product.title,
+       link: offer.affiliateUrl,
+       imageUrl: offer.product.imageUrl,
+     });
+     logger.info({ offerId, jid }, 'oferta enviada');
+     return prisma.offer.update({
+       where: { id: offerId },
+       data: { status: OfferStatus.SENT, sentAt: new Date(), groupJid: jid, failReason: null },
+     });
+   } catch (err) {
+diff --git a/apps/api/src/workers/index.ts b/apps/api/src/workers/index.ts
+index 298461e..44a4e77 100644
+--- a/apps/api/src/workers/index.ts
++++ b/apps/api/src/workers/index.ts
+@@ -5,20 +5,21 @@ import { logger } from '../lib/logger.js';
+ import { sleep } from '../lib/http.js';
+ import { connectors } from '../connectors/index.js';
+ import { NICHOS_SHOPEE } from '../connectors/nichos.js';
+ import { harvestCategories, type CategorySyncSummary } from '../connectors/shopee-feed.js';
+ import { NICHOS_PRONTOS } from '../connectors/nichos-prontos.js';
+ import { seedCategoriasN3 } from '../connectors/categorias-n3.js';
+ import { buscarPorNicho, carregarNicho } from '../services/nichos.js';
+ import { ingestProduct, upsertProduct } from '../services/ingest.js';
+ import { sendOffer } from '../services/dispatch.js';
+ import { runAutomacoes } from '../services/automacoes.js';
++import { runDisparos } from '../services/disparo.js';
+ 
+ /**
+  * Resumo do que uma rodada fez. Existe porque disparo manual sem retorno e
+  * indistinguivel de "nao rodou": monitor com lista vazia termina em silencio,
+  * e garimpo que toma 403 da plataforma tambem.
+  */
+ export interface MonitorSummary {
+   checked: number;
+   fired: number;
+   failed: number;
+@@ -141,21 +142,24 @@ export async function runDiscovery(): Promise<DiscoverySummary> {
+         if (discount < minDiscount) continue;
+         if (minCommission > 0 && (p.commissionPct ?? 0) < minCommission) continue;
+ 
+         // Se ja existe oferta aberta ou recente desse produto, nao duplica.
+         const existing = await prisma.product.findUnique({
+           where: { platform_externalId: { platform: p.platform, externalId: p.externalId } },
+           include: {
+             offers: {
+               where: {
+                 OR: [
+-                  { status: { in: [OfferStatus.PENDING, OfferStatus.QUEUED] } },
++                  // DISPATCHING entra aqui: oferta reservada por um Disparo
++                  // ainda esta "ativa" pro produto, so ainda nao saiu -- sem
++                  // isso o garimpo duplicava o produto no meio de um disparo.
++                  { status: { in: [OfferStatus.PENDING, OfferStatus.QUEUED, OfferStatus.DISPATCHING] } },
+                   { sentAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+                 ],
+               },
+               take: 1,
+             },
+           },
+         });
+         if (existing?.offers.length) continue;
+ 
+         await ingestProduct(p, OfferSource.DISCOVERY, { nicheId: rule.nicheId ?? undefined });
+@@ -277,17 +281,20 @@ export async function seedNichosProntos(): Promise<number> {
+     });
+     criados++;
+     logger.info({ nicho: pronto.name }, 'nicho pronto criado');
+   }
+   return criados;
+ }
+ 
+ export function startWorkers() {
+   const tz = 'America/Sao_Paulo';
+   cron.schedule('*/1 * * * *', () => void runScheduler(), { timezone: tz });
++  // Disparos: mesmo ritmo do agendador, motivo separado -- QUEUED e
++  // DISPATCHING sao filas diferentes de proposito (ver services/disparo.ts).
++  cron.schedule('*/1 * * * *', () => void runDisparos(), { timezone: tz });
+   cron.schedule('*/5 * * * *', () => void runAutomacoes(), { timezone: tz });
+   cron.schedule('7 * * * *', () => void runPriceMonitor(), { timezone: tz });
+   cron.schedule('23 */3 * * *', () => void runDiscovery(), { timezone: tz });
+   cron.schedule('40 6,18 * * *', () => void runConversionSync(), { timezone: tz });
+   cron.schedule('15 4 * * 1', () => void runCategorySync(), { timezone: tz });
+   logger.info('workers agendados (fuso America/Sao_Paulo)');
+ }
+diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx
+index d31cb1e..05d83a7 100644
+--- a/apps/web/src/App.tsx
++++ b/apps/web/src/App.tsx
+@@ -3,20 +3,21 @@ import { Route, Routes } from 'react-router-dom';
+ import { api } from './api.js';
+ import { Layout } from './components/Layout.js';
+ import { Logo } from './components/Logo.js';
+ import { VisaoGeral } from './pages/VisaoGeral.js';
+ import { Fila } from './pages/Fila.js';
+ import { Desempenho } from './pages/Desempenho.js';
+ import { Nichos } from './pages/Nichos.js';
+ import { Produtos } from './pages/Produtos.js';
+ import { Agenda } from './pages/Agenda.js';
+ import { Automacoes } from './pages/Automacoes.js';
++import { Disparos } from './pages/Disparos.js';
+ import { Templates } from './pages/Templates.js';
+ import { Conexoes } from './pages/Conexoes.js';
+ 
+ function Login({ onIn }: { onIn: () => void }) {
+   const [password, setPassword] = useState('');
+   const [error, setError] = useState<string | null>(null);
+   const [busy, setBusy] = useState(false);
+ 
+   async function submit() {
+     setBusy(true);
+@@ -80,16 +81,17 @@ export default function App() {
+   return (
+     <Layout>
+       <Routes>
+         <Route path="/" element={<VisaoGeral />} />
+         <Route path="/fila" element={<Fila />} />
+         <Route path="/desempenho" element={<Desempenho />} />
+         <Route path="/produtos" element={<Produtos />} />
+         <Route path="/nichos" element={<Nichos />} />
+         <Route path="/agenda" element={<Agenda />} />
+         <Route path="/automacoes" element={<Automacoes />} />
++        <Route path="/disparos" element={<Disparos />} />
+         <Route path="/templates" element={<Templates />} />
+         <Route path="/conexoes" element={<Conexoes />} />
+       </Routes>
+     </Layout>
+   );
+ }
+diff --git a/apps/web/src/components/Layout.tsx b/apps/web/src/components/Layout.tsx
+index 516ff68..3537873 100644
+--- a/apps/web/src/components/Layout.tsx
++++ b/apps/web/src/components/Layout.tsx
+@@ -13,20 +13,21 @@ const GROUPS: { label: string | null; items: NavLinkDef[] }[] = [
+     items: [
+       { to: '/nichos', label: 'Nichos' },
+       { to: '/produtos', label: 'Preços vigiados' },
+     ],
+   },
+   {
+     label: 'Automação',
+     items: [
+       { to: '/agenda', label: 'Agenda' },
+       { to: '/automacoes', label: 'Automações' },
++      { to: '/disparos', label: 'Disparos' },
+       { to: '/templates', label: 'Modelos' },
+     ],
+   },
+   { label: 'Métricas', items: [{ to: '/desempenho', label: 'Desempenho' }] },
+   { label: 'Configurações', items: [{ to: '/conexoes', label: 'Conexões' }] },
+ ];
+ 
+ export function Layout({ children }: { children: React.ReactNode }) {
+   const [pending, setPending] = useState(0);
+   const [wa, setWa] = useState<{ status: string; quota: { used: number; cap: number } } | null>(null);
+diff --git a/apps/web/src/pages/Disparos.tsx b/apps/web/src/pages/Disparos.tsx
+new file mode 100644
+index 0000000..ba3c801
+--- /dev/null
++++ b/apps/web/src/pages/Disparos.tsx
+@@ -0,0 +1,586 @@
++import { useEffect, useState } from 'react';
++import { api, brl, STORE, type Offer } from '../api.js';
++
++interface TemplateLite {
++  id: string;
++  name: string;
++  body: string;
++  ctas: string[];
++}
++
++interface Grupo {
++  jid: string;
++  name: string;
++  isDefault: boolean;
++}
++
++interface DisparoResumo {
++  id: string;
++  status: 'DRAFT' | 'SENDING' | 'DONE' | 'CANCELLED';
++  templateId: string;
++  templateName: string | null;
++  groupJids: string[];
++  startAt: string;
++  intervalMinutes: number;
++  avoidNightHours: boolean;
++  avoidWeekends: boolean;
++  skipExpiredOffers: boolean;
++  createdAt: string;
++  cancelledAt: string | null;
++  total: number;
++  enviados: number;
++  falharam: number;
++  pendentes: number;
++  estimatedFinish: string | null;
++}
++
++interface DisparoItemDetalhe {
++  id: string;
++  offerId: string;
++  offerTitle: string | null;
++  groupJid: string;
++  status: 'PENDING' | 'SENT' | 'FAILED';
++  scheduledFor: string;
++  sentAt: string | null;
++  failReason: string | null;
++}
++
++const STATUS_LABEL: Record<DisparoResumo['status'], string> = {
++  DRAFT: 'aguardando início',
++  SENDING: 'enviando',
++  DONE: 'concluído',
++  CANCELLED: 'cancelado',
++};
++
++function fmt(iso: string | null) {
++  if (!iso) return '—';
++  return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
++}
++
++const PASSOS = ['Ofertas', 'Mensagem', 'Destinos'];
++
++export function Disparos() {
++  const [tab, setTab] = useState<'novo' | 'andamento'>('novo');
++
++  return (
++    <>
++      <div className="head">
++        <div>
++          <h1>Disparos</h1>
++          <p>
++            Manda um lote de ofertas pra um ou mais grupos, espaçadas no tempo — sem rajada. Cada oferta sai uma
++            vez por grupo escolhido, no intervalo que você definir.
++          </p>
++        </div>
++      </div>
++
++      <div className="tabs">
++        <button className="tabs__item" data-on={tab === 'novo'} onClick={() => setTab('novo')}>
++          Novo disparo
++        </button>
++        <button className="tabs__item" data-on={tab === 'andamento'} onClick={() => setTab('andamento')}>
++          Em andamento
++        </button>
++      </div>
++
++      {tab === 'novo' ? <NovoDisparo onCriado={() => setTab('andamento')} /> : <EmAndamento />}
++    </>
++  );
++}
++
++function NovoDisparo({ onCriado }: { onCriado: () => void }) {
++  const [step, setStep] = useState(1);
++
++  const [offers, setOffers] = useState<Offer[]>([]);
++  const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
++  const [loadingOffers, setLoadingOffers] = useState(true);
++
++  const [templates, setTemplates] = useState<TemplateLite[]>([]);
++  const [templateId, setTemplateId] = useState('');
++  const [preview, setPreview] = useState('');
++
++  const [grupos, setGrupos] = useState<Grupo[]>([]);
++  const [groupJids, setGroupJids] = useState<Set<string>>(new Set());
++  const [quando, setQuando] = useState<'agora' | 'agendar'>('agora');
++  const [agendadoPara, setAgendadoPara] = useState('');
++  const [intervalMinutes, setIntervalMinutes] = useState(5);
++  const [avoidNightHours, setAvoidNightHours] = useState(true);
++  const [avoidWeekends, setAvoidWeekends] = useState(false);
++  const [skipExpiredOffers, setSkipExpiredOffers] = useState(false);
++
++  const [criando, setCriando] = useState(false);
++  const [erro, setErro] = useState<string | null>(null);
++
++  useEffect(() => {
++    setLoadingOffers(true);
++    api
++      .get<Offer[]>('/api/offers?status=PENDING')
++      .then((os) => {
++        setOffers(os);
++        setSelecionadas(new Set(os.map((o) => o.id)));
++      })
++      .catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar a fila.'))
++      .finally(() => setLoadingOffers(false));
++
++    api.get<TemplateLite[]>('/api/templates').then(setTemplates).catch(() => {});
++    api
++      .get<{ groups: Grupo[] }>('/api/whatsapp/status')
++      .then((r) => setGrupos(r.groups ?? []))
++      .catch(() => {});
++  }, []);
++
++  // Pré-visualização acompanha o modelo escolhido.
++  useEffect(() => {
++    const t = templates.find((x) => x.id === templateId);
++    if (!t) return setPreview('');
++    api
++      .post<{ text: string }>('/api/templates/preview', { body: t.body, ctas: t.ctas })
++      .then((r) => setPreview(r.text))
++      .catch(() => setPreview(''));
++  }, [templateId, templates]);
++
++  function alternarOferta(id: string) {
++    setSelecionadas((prev) => {
++      const next = new Set(prev);
++      if (next.has(id)) next.delete(id);
++      else next.add(id);
++      return next;
++    });
++  }
++
++  function alternarGrupo(jid: string) {
++    setGroupJids((prev) => {
++      const next = new Set(prev);
++      if (next.has(jid)) next.delete(jid);
++      else next.add(jid);
++      return next;
++    });
++  }
++
++  const totalEnvios = selecionadas.size * groupJids.size;
++
++  function estimativaFim(): Date | null {
++    if (!totalEnvios) return null;
++    const inicio = quando === 'agora' ? new Date() : agendadoPara ? new Date(agendadoPara) : null;
++    if (!inicio || Number.isNaN(inicio.getTime())) return null;
++    return new Date(inicio.getTime() + (totalEnvios - 1) * intervalMinutes * 60_000);
++  }
++
++  async function criar() {
++    setErro(null);
++    if (quando === 'agendar' && !agendadoPara) return setErro('Escolha a data/hora do agendamento.');
++    if (intervalMinutes < 5) return setErro('O intervalo mínimo é 5 minutos.');
++
++    setCriando(true);
++    try {
++      await api.post('/api/disparos', {
++        offerIds: [...selecionadas],
++        templateId,
++        groupJids: [...groupJids],
++        startNow: quando === 'agora',
++        scheduledFor: quando === 'agendar' ? new Date(agendadoPara).toISOString() : undefined,
++        intervalMinutes,
++        avoidNightHours,
++        avoidWeekends,
++        skipExpiredOffers,
++      });
++      onCriado();
++    } catch (err) {
++      setErro(err instanceof Error ? err.message : 'Não consegui criar o disparo.');
++    } finally {
++      setCriando(false);
++    }
++  }
++
++  const fim = estimativaFim();
++
++  return (
++    <div className="panel">
++      <div className="steps">
++        {PASSOS.map((nome, i) => {
++          const n = i + 1;
++          return (
++            <div className="steps__item" key={nome} data-on={step === n} data-done={step > n}>
++              <span className="steps__num">{step > n ? '✓' : n}</span>
++              {nome}
++              {n < PASSOS.length && <span className="steps__sep" />}
++            </div>
++          );
++        })}
++      </div>
++
++      {erro && <div className="notice">{erro}</div>}
++
++      {step === 1 && (
++        <>
++          <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
++            {loadingOffers
++              ? 'Carregando a fila...'
++              : `${selecionadas.size} de ${offers.length} oferta(s) selecionada(s).`}
++          </p>
++          {!loadingOffers && offers.length === 0 && (
++            <div className="empty">
++              <strong>Fila vazia</strong>
++              Não há ofertas pendentes pra colocar num disparo.
++            </div>
++          )}
++          {offers.length > 0 && (
++            <>
++              <div className="row" style={{ marginBottom: 10 }}>
++                <button className="btn btn--ghost btn--sm" onClick={() => setSelecionadas(new Set(offers.map((o) => o.id)))}>
++                  Marcar todas
++                </button>
++                <button className="btn btn--ghost btn--sm" onClick={() => setSelecionadas(new Set())}>
++                  Desmarcar todas
++                </button>
++              </div>
++              <div className="picked" style={{ maxHeight: 420 }}>
++                {offers.map((o) => (
++                  <label
++                    key={o.id}
++                    className="picked__item"
++                    style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
++                  >
++                    <input
++                      type="checkbox"
++                      checked={selecionadas.has(o.id)}
++                      onChange={() => alternarOferta(o.id)}
++                      style={{ width: 'auto', flex: 'none' }}
++                    />
++                    {o.product.imageUrl && (
++                      <img
++                        src={o.product.imageUrl}
++                        alt=""
++                        loading="lazy"
++                        style={{ width: 34, height: 34, objectFit: 'contain', background: 'var(--canvas)', borderRadius: 2, flexShrink: 0 }}
++                      />
++                    )}
++                    <span style={{ flex: 1, fontSize: 13 }}>
++                      {o.product.title}
++                      <br />
++                      <small style={{ color: 'var(--muted)' }}>
++                        {STORE[o.product.platform]} · {brl(o.price)}
++                      </small>
++                    </span>
++                  </label>
++                ))}
++              </div>
++            </>
++          )}
++          <div style={{ marginTop: 16 }}>
++            <button className="btn" disabled={selecionadas.size === 0} onClick={() => setStep(2)}>
++              Continuar
++            </button>
++          </div>
++        </>
++      )}
++
++      {step === 2 && (
++        <>
++          {templates.length === 0 ? (
++            <div className="empty">
++              <strong>Nenhum modelo criado</strong>
++              Crie um modelo em Modelos antes de montar um disparo.
++            </div>
++          ) : (
++            <div className="split">
++              <div className="field">
++                <label>Modelo de mensagem</label>
++                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
++                  {templates.map((t) => (
++                    <button
++                      type="button"
++                      key={t.id}
++                      className="chip"
++                      data-tone={templateId === t.id ? 'on' : 'off'}
++                      style={{ cursor: 'pointer', background: 'none', textAlign: 'left', padding: '8px 10px' }}
++                      onClick={() => setTemplateId(t.id)}
++                    >
++                      {t.name}
++                    </button>
++                  ))}
++                </div>
++              </div>
++              <div className="field">
++                <label>Pré-visualização (dados de exemplo)</label>
++                <div className="notice" style={{ whiteSpace: 'pre-wrap', fontFamily: 'var(--mono)', fontSize: 13 }}>
++                  {templateId ? preview || 'Renderizando...' : 'Escolha um modelo pra ver o resultado aqui.'}
++                </div>
++              </div>
++            </div>
++          )}
++          <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
++            <button className="btn btn--ghost" onClick={() => setStep(1)}>
++              Voltar
++            </button>
++            <button className="btn" disabled={!templateId} onClick={() => setStep(3)}>
++              Continuar
++            </button>
++          </div>
++        </>
++      )}
++
++      {step === 3 && (
++        <>
++          {grupos.length === 0 && (
++            <div className="empty">
++              <strong>Nenhum grupo sincronizado</strong>
++              Conecte o WhatsApp e sincronize os grupos em Conexões antes de disparar.
++            </div>
++          )}
++          <div className="field" style={{ marginBottom: 14 }}>
++            <label>Grupos de destino</label>
++            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
++              {grupos.map((g) => (
++                <button
++                  type="button"
++                  key={g.jid}
++                  className="chip"
++                  data-tone={groupJids.has(g.jid) ? 'on' : 'off'}
++                  style={{ cursor: 'pointer', background: 'none' }}
++                  onClick={() => alternarGrupo(g.jid)}
++                >
++                  {g.name}
++                </button>
++              ))}
++            </div>
++          </div>
++
++          <div className="row" style={{ marginBottom: 14 }}>
++            <div className="field" style={{ flex: '0 1 200px' }}>
++              <label>Início</label>
++              <div style={{ display: 'flex', gap: 6 }}>
++                <button
++                  type="button"
++                  className="chip"
++                  data-tone={quando === 'agora' ? 'on' : 'off'}
++                  style={{ cursor: 'pointer', background: 'none' }}
++                  onClick={() => setQuando('agora')}
++                >
++                  Agora
++                </button>
++                <button
++                  type="button"
++                  className="chip"
++                  data-tone={quando === 'agendar' ? 'on' : 'off'}
++                  style={{ cursor: 'pointer', background: 'none' }}
++                  onClick={() => setQuando('agendar')}
++                >
++                  Agendar
++                </button>
++              </div>
++            </div>
++            {quando === 'agendar' && (
++              <div className="field" style={{ flex: '0 1 220px' }}>
++                <label htmlFor="agendadoPara">Data/hora</label>
++                <input
++                  id="agendadoPara"
++                  type="datetime-local"
++                  value={agendadoPara}
++                  onChange={(e) => setAgendadoPara(e.target.value)}
++                />
++              </div>
++            )}
++            <div className="field" style={{ flex: '0 1 160px' }}>
++              <label htmlFor="intervalo">Intervalo (min)</label>
++              <input
++                id="intervalo"
++                inputMode="numeric"
++                value={intervalMinutes}
++                onChange={(e) => setIntervalMinutes(Math.max(5, Number(e.target.value) || 5))}
++              />
++              <small>mínimo 5 — um envio por vez, nunca rajada</small>
++            </div>
++          </div>
++
++          <div className="field" style={{ marginBottom: 16 }}>
++            <label>Guardas de segurança</label>
++            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
++              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++                <input
++                  type="checkbox"
++                  checked={avoidNightHours}
++                  onChange={(e) => setAvoidNightHours(e.target.checked)}
++                  style={{ width: 'auto' }}
++                />
++                <span style={{ fontSize: 13 }}>Não enviar entre 23h e 06h — adia pro dia seguinte às 06h.</span>
++              </label>
++              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++                <input
++                  type="checkbox"
++                  checked={avoidWeekends}
++                  onChange={(e) => setAvoidWeekends(e.target.checked)}
++                  style={{ width: 'auto' }}
++                />
++                <span style={{ fontSize: 13 }}>Não enviar aos sábados e domingos.</span>
++              </label>
++              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
++                <input
++                  type="checkbox"
++                  checked={skipExpiredOffers}
++                  onChange={(e) => setSkipExpiredOffers(e.target.checked)}
++                  style={{ width: 'auto' }}
++                />
++                <span style={{ fontSize: 13 }}>
++                  Não enviar ofertas expiradas <small style={{ color: 'var(--muted)' }}>(guardado pra depois — ainda sem efeito)</small>
++                </span>
++              </label>
++            </div>
++          </div>
++
++          <div className="notice" data-tone="warn" style={{ marginBottom: 16 }}>
++            <strong>
++              {selecionadas.size} oferta{selecionadas.size === 1 ? '' : 's'} × {groupJids.size} grupo
++              {groupJids.size === 1 ? '' : 's'} = {totalEnvios} envio{totalEnvios === 1 ? '' : 's'}
++            </strong>
++            {fim && (
++              <>
++                <br />
++                Previsão de término: {fim.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
++              </>
++            )}
++          </div>
++
++          <div style={{ display: 'flex', gap: 8 }}>
++            <button className="btn btn--ghost" onClick={() => setStep(2)}>
++              Voltar
++            </button>
++            <button className="btn" disabled={criando || groupJids.size === 0 || totalEnvios === 0} onClick={() => void criar()}>
++              {criando ? 'Criando...' : 'Criar disparo'}
++            </button>
++          </div>
++        </>
++      )}
++    </div>
++  );
++}
++
++function EmAndamento() {
++  const [disparos, setDisparos] = useState<DisparoResumo[]>([]);
++  const [grupos, setGrupos] = useState<Grupo[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [expandido, setExpandido] = useState<string | null>(null);
++  const [itens, setItens] = useState<DisparoItemDetalhe[]>([]);
++  const [cancelando, setCancelando] = useState<string | null>(null);
++
++  async function carregar() {
++    setDisparos(await api.get<DisparoResumo[]>('/api/disparos'));
++  }
++
++  useEffect(() => {
++    setLoading(true);
++    Promise.all([
++      carregar(),
++      api.get<{ groups: Grupo[] }>('/api/whatsapp/status').then((r) => setGrupos(r.groups ?? [])),
++    ]).finally(() => setLoading(false));
++
++    // Progresso ao vivo: reconsulta enquanto essa aba estiver aberta.
++    const t = setInterval(() => void carregar().catch(() => {}), 8000);
++    return () => clearInterval(t);
++  }, []);
++
++  const nomeGrupo = (jid: string) => grupos.find((g) => g.jid === jid)?.name ?? jid;
++
++  async function alternarExpandido(id: string) {
++    if (expandido === id) {
++      setExpandido(null);
++      return;
++    }
++    setExpandido(id);
++    const detalhe = await api.get<{ items: DisparoItemDetalhe[] }>(`/api/disparos/${id}`);
++    setItens(detalhe.items);
++  }
++
++  async function cancelar(id: string) {
++    if (!confirm('Cancelar esse disparo? Os envios que ainda não saíram voltam pra fila; os que já saíram continuam enviados.')) return;
++    setCancelando(id);
++    try {
++      await api.post(`/api/disparos/${id}/cancelar`);
++      await carregar();
++    } catch (err) {
++      alert(err instanceof Error ? err.message : 'Não consegui cancelar.');
++    } finally {
++      setCancelando(null);
++    }
++  }
++
++  if (loading) return null;
++
++  if (disparos.length === 0) {
++    return (
++      <div className="empty">
++        <strong>Nenhum disparo criado</strong>
++        Vá em "Novo disparo" pra mandar um lote de ofertas pros seus grupos.
++      </div>
++    );
++  }
++
++  return (
++    <>
++      {disparos.map((d) => {
++        const pct = d.total ? Math.round(((d.enviados + d.falharam) / d.total) * 100) : 0;
++        const cancelavel = d.status === 'DRAFT' || d.status === 'SENDING';
++        return (
++          <div key={d.id} className="panel" style={{ marginBottom: 12 }}>
++            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
++              <div style={{ flex: 1, cursor: 'pointer' }} onClick={() => void alternarExpandido(d.id)}>
++                <h2 className="panel__title" style={{ marginBottom: 4 }}>
++                  {d.templateName ?? 'Modelo apagado'}
++                  <span className="chip" data-tone={d.status === 'DONE' ? 'on' : d.status === 'CANCELLED' ? 'off' : undefined} style={{ marginLeft: 8 }}>
++                    {STATUS_LABEL[d.status]}
++                  </span>
++                </h2>
++                <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
++                  {d.groupJids.map(nomeGrupo).join(', ')} · a cada {d.intervalMinutes} min
++                </p>
++              </div>
++              {cancelavel && (
++                <button className="btn btn--ghost btn--sm" disabled={cancelando === d.id} onClick={() => void cancelar(d.id)}>
++                  {cancelando === d.id ? 'Cancelando...' : 'Cancelar'}
++                </button>
++              )}
++            </div>
++
++            <div style={{ marginTop: 12 }}>
++              <div className="progress">
++                <div className="progress__bar" style={{ width: `${pct}%` }} />
++              </div>
++              <p style={{ fontSize: 12, color: 'var(--muted)', margin: '6px 0 0', fontFamily: 'var(--mono)' }}>
++                {d.enviados + d.falharam}/{d.total} envios · {pct}%
++                {d.falharam > 0 && ` · ${d.falharam} falha(s)`}
++                {d.estimatedFinish && d.status !== 'DONE' && d.status !== 'CANCELLED' && (
++                  <> · previsão de término {fmt(d.estimatedFinish)}</>
++                )}
++              </p>
++            </div>
++
++            {expandido === d.id && (
++              <table className="table" style={{ marginTop: 14 }}>
++                <thead>
++                  <tr>
++                    <th>Oferta</th>
++                    <th>Grupo</th>
++                    <th>Status</th>
++                    <th className="num">Horário</th>
++                  </tr>
++                </thead>
++                <tbody>
++                  {itens.map((i) => (
++                    <tr key={i.id}>
++                      <td>{i.offerTitle ?? '—'}</td>
++                      <td>{nomeGrupo(i.groupJid)}</td>
++                      <td>
++                        {i.status === 'SENT' ? 'enviado' : i.status === 'FAILED' ? `falhou${i.failReason ? `: ${i.failReason}` : ''}` : 'pendente'}
++                      </td>
++                      <td className="num">{fmt(i.sentAt ?? i.scheduledFor)}</td>
++                    </tr>
++                  ))}
++                </tbody>
++              </table>
++            )}
++          </div>
++        );
++      })}
++    </>
++  );
++}
+diff --git a/apps/web/src/styles.css b/apps/web/src/styles.css
+index 99dbb78..5469b97 100644
+--- a/apps/web/src/styles.css
++++ b/apps/web/src/styles.css
+@@ -1334,20 +1334,88 @@ button.chip {
+   .card__botoes {
+     grid-template-columns: 1fr 1.6fr;
+     gap: 10px;
+   }
+ 
+   .card__enviar {
+     font-size: 12.5px;
+   }
+ }
+ 
++/* ---------------- disparos: passo a passo e barra de progresso ---------------- */
++
++.steps {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  margin-bottom: 20px;
++}
++
++.steps__item {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  font-size: 13px;
++  font-weight: 600;
++  color: var(--muted);
++  white-space: nowrap;
++}
++
++.steps__num {
++  width: 24px;
++  height: 24px;
++  border-radius: 50%;
++  border: 1px solid var(--line);
++  display: grid;
++  place-items: center;
++  font-family: var(--mono);
++  font-size: 12px;
++  flex-shrink: 0;
++}
++
++.steps__item[data-on='true'] {
++  color: var(--ink);
++}
++
++.steps__item[data-on='true'] .steps__num {
++  background: var(--ink);
++  border-color: var(--ink);
++  color: #fff;
++}
++
++.steps__item[data-done='true'] .steps__num {
++  background: var(--gain);
++  border-color: var(--gain);
++  color: #fff;
++}
++
++.steps__sep {
++  flex: 1;
++  height: 1px;
++  background: var(--line);
++  min-width: 20px;
++}
++
++.progress {
++  height: 8px;
++  border-radius: 20px;
++  background: var(--canvas);
++  overflow: hidden;
++  border: 1px solid var(--line);
++}
++
++.progress__bar {
++  height: 100%;
++  background: var(--gain);
++  transition: width 200ms ease;
++}
++
+ /* ---------------------------------------------------------------
+    Modo escuro: ajustes pontuais
+    O flip de token quebra qualquer lugar que usava --ink como FUNDO
+    escuro fixo (rail, botão primário, aba ativa, mark do login) --
+    nesses o --ink virou texto claro, então o fundo precisa ficar preso
+    num tom escuro. E qualquer lugar com texto var(--ink) sobre fundo
+    var(--brand)/var(--tag) (que não muda de cor) também precisa do
+    texto preso em escuro, senão vira texto quase-branco sobre amarelo.
+    --------------------------------------------------------------- */
+ 
+@@ -1362,20 +1430,25 @@ button.chip {
+ [data-theme='dark'] .btn:not(.btn--ghost):not(.btn--tag) {
+   background: #3a3b40;
+   border-color: #3a3b40;
+ }
+ 
+ [data-theme='dark'] .tabs__item[data-on='true'] {
+   background: #3a3b40;
+   border-color: #3a3b40;
+ }
+ 
++[data-theme='dark'] .steps__item[data-on='true'] .steps__num {
++  background: #3a3b40;
++  border-color: #3a3b40;
++}
++
+ [data-theme='dark'] .rail__count,
+ [data-theme='dark'] .btn--tag,
+ [data-theme='dark'] .tag__score,
+ [data-theme='dark'] .tabs__item[data-on='true'] span,
+ [data-theme='dark'] .card__selo,
+ [data-theme='dark'] .card__nicho {
+   color: #16171a;
+ }
+ 
+ /* Caixa de estado vazio usava branco translúcido sobre o papel claro;

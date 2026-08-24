@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="24 16 152 224" role="img" aria-label="Hub Ofertas">
+  <!-- H de peca unica: as hastes se ligam por uma travessa em curva S que desce
+       da esquerda para a direita. Hastes de 52un, contraforma de 48un,
+       travessa de 36un centrada na altura. -->
+  <path fill="#ffe01b" d="M24 16 H76 V92 C100 92 100 128 124 128 V16 H176 V240 H124 V164 C100 164 100 128 76 128 V240 H24 Z"/>
+</svg>

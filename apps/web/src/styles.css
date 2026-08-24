@@ -1,25 +1,60 @@
 /* ---------------------------------------------------------------
-   Oferta Hub — sistema visual
+   Hub Ofertas — sistema visual
    Referência: etiqueta de preço de gôndola. Números grandes, papel
    fosco, adesivo amarelo. O painel existe pra você bater o olho e
    decidir "manda ou pula", então o preço é sempre o maior elemento.
    --------------------------------------------------------------- */
 
 :root {
+  /* Amarelo da marca: mesma tinta do logo, do favicon e da etiqueta de preco.
+     Fonte unica da verdade -- --tag existe so como apelido semantico. */
+  --brand: #ffe01b;
+
   --ink: #16171a;
-  --canvas: #e8e9eb;
-  --surface: #ffffff;
-  --tag: #ffe01b;
+  --canvas: #f4f4f2;
+  --surface: rgba(22, 23, 26, 0.04);
+  --tag: var(--brand);
   --drop: #d93a1e;
   --gain: #0c7c4a;
   --muted: #74787f;
-  --line: #d8dadd;
+  --line: rgba(22, 23, 26, 0.1);
 
-  --display: 'Archivo', system-ui, sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  /* Superficie elevada opaca: botao primario e passo ativo. Nao pode usar
+     --ink, que no tema escuro vira texto claro. */
+  --raise: #16171a;
 
-  --r: 3px;
-  --shadow: 0 1px 0 rgba(22, 23, 26, 0.06), 0 2px 8px rgba(22, 23, 26, 0.06);
+  /* Texto que vai SOBRE --brand. --brand nao muda entre temas, entao esse
+     texto tambem nao pode mudar -- senao no escuro vira quase-branco sobre
+     amarelo. Mesma tecnica dos overrides pontuais que existiam antes. */
+  --on-brand: #16171a;
+
+  /* Fundo escuro fixo pra superficie que nao segue o flip de --ink:
+     sidebar e mark do login. */
+  --slate: #16171a;
+
+  --display: 'Space Grotesk', system-ui, sans-serif;
+  --mono: 'Space Grotesk', system-ui, sans-serif;
+
+  --r: 12px;
+  --r-sm: 8px;
+  --r-pill: 999px;
+  --shadow: 0 1px 0 rgba(22, 23, 26, 0.04), 0 2px 8px rgba(22, 23, 26, 0.05);
+}
+
+/* Modo escuro: mesmos nomes de token, valores invertidos. --brand/--tag,
+   --on-brand, --slate, --display, --mono e os raios ficam de fora -- não
+   mudam entre temas. */
+[data-theme='dark'] {
+  --ink: #f2f2f0;
+  --canvas: #0c0c11;
+  --surface: rgba(255, 255, 255, 0.055);
+  --drop: #ff6b52;
+  --gain: #22a866;
+  --muted: #9a9da3;
+  --line: rgba(255, 255, 255, 0.1);
+  --raise: #2f3037;
+
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 2px 10px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -40,6 +75,18 @@ body {
   font-size: 15px;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Space Grotesk substituiu a mono: sem tabular-nums os precos mudam de
+   largura a cada digito e a coluna numerica da tabela treme. */
+.table .num,
+.kpi__value,
+.kpi__delta,
+.card__agora,
+.card__antes,
+.tag__now,
+.tag__was {
+  font-variant-numeric: tabular-nums;
 }
 
 button,
@@ -63,7 +110,7 @@ a {
 }
 
 .rail {
-  background: var(--ink);
+  background: var(--slate);
   color: #fff;
   padding: 22px 14px;
   display: flex;
@@ -75,16 +122,27 @@ a {
 }
 
 .rail__mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.rail__logo {
+  color: var(--brand);
+  flex: none;
+}
+
+.rail__wordmark {
   font-weight: 800;
   font-size: 17px;
   letter-spacing: -0.04em;
   line-height: 1.1;
-  padding: 0 8px;
 }
 
-.rail__mark span {
+.rail__wordmark span {
   display: block;
-  color: var(--tag);
+  color: var(--brand);
 }
 
 .rail__nav {
@@ -93,13 +151,27 @@ a {
   gap: 2px;
 }
 
+.rail__group + .rail__group {
+  margin-top: 14px;
+}
+
+.rail__group-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 0 10px;
+  margin: 0 0 4px;
+}
+
 .rail__link {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
   padding: 9px 10px;
-  border-radius: var(--r);
+  border-radius: var(--r-sm);
   text-decoration: none;
   color: rgba(255, 255, 255, 0.66);
   font-size: 14px;
@@ -121,20 +193,58 @@ a {
   font-family: var(--mono);
   font-size: 11px;
   background: var(--tag);
-  color: var(--ink);
-  border-radius: 20px;
+  color: var(--on-brand);
+  border-radius: var(--r-pill);
   padding: 1px 7px;
   font-weight: 600;
 }
 
 .rail__foot {
   margin-top: auto;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
   padding: 0 8px;
+}
+
+.rail__user {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
+  gap: 6px;
+}
+
+.rail__user__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+}
+
+.rail__user__status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.rail__user__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  flex: none;
+}
+
+.rail__user__dot[data-online='true'] {
+  background: var(--tag);
+}
+
+.rail__user__quota {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .main {
@@ -169,23 +279,21 @@ a {
 /* ---------------- controles ---------------- */
 
 .btn {
-  border: 1px solid var(--ink);
-  background: var(--ink);
+  border: 1px solid var(--raise);
+  background: var(--raise);
   color: #fff;
-  padding: 8px 14px;
+  padding: 9px 16px;
   border-radius: var(--r);
   font-weight: 600;
   font-size: 14px;
   cursor: pointer;
-  transition: transform 90ms ease, opacity 120ms ease;
+  /* A referencia nao usa animacao de entrada, keyframe, nem transicao de
+     pagina. So opacidade e cor. */
+  transition: opacity 0.1s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
 .btn:hover {
-  opacity: 0.88;
-}
-
-.btn:active {
-  transform: translateY(1px);
+  opacity: 0.86;
 }
 
 .btn:disabled {
@@ -207,12 +315,13 @@ a {
 .btn--tag {
   background: var(--tag);
   border-color: var(--tag);
-  color: var(--ink);
+  color: var(--on-brand);
 }
 
 .btn--sm {
-  padding: 5px 10px;
+  padding: 6px 12px;
   font-size: 13px;
+  border-radius: var(--r-sm);
 }
 
 .field {
@@ -239,7 +348,7 @@ select,
 textarea {
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: var(--r);
+  border-radius: var(--r-sm);
   padding: 9px 11px;
   width: 100%;
   outline: none;
@@ -281,6 +390,42 @@ textarea {
   text-transform: uppercase;
   color: var(--muted);
   margin: 0 0 14px;
+}
+
+.panel--hero {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
+  padding: 24px;
+}
+
+/* Tudo dentro do hero vai sobre amarelo: nada ali pode seguir --ink nem
+   --muted, que invertem com o tema. */
+.panel--hero .panel__title,
+.panel--hero p,
+.panel--hero a,
+.panel--hero strong {
+  color: var(--on-brand);
+}
+
+.panel--hero .panel__title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.panel--hero p {
+  margin: 0 0 14px;
+  max-width: 62ch;
+}
+
+/* Botao preto sobre o amarelo: --raise no tema escuro e cinza-chumbo e
+   sumiria contra o hero. */
+.panel--hero .btn {
+  background: var(--slate);
+  border-color: var(--slate);
+  color: #fff;
+  display: inline-block;
+  text-decoration: none;
 }
 
 .row {
@@ -354,8 +499,7 @@ textarea {
 }
 
 .tag:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 3px 14px rgba(22, 23, 26, 0.1);
+  border-color: color-mix(in srgb, var(--ink) 28%, transparent);
 }
 
 .tag[data-leaving='true'] {
@@ -375,7 +519,7 @@ textarea {
   background: repeating-linear-gradient(
     to bottom,
     transparent 0 9px,
-    rgba(22, 23, 26, 0.055) 9px 10px
+    var(--surface) 9px 10px
   );
 }
 
@@ -402,7 +546,7 @@ textarea {
   height: 54px;
   object-fit: contain;
   background: var(--canvas);
-  border-radius: var(--r);
+  border-radius: var(--r-sm);
   flex-shrink: 0;
 }
 
@@ -462,12 +606,12 @@ textarea {
   top: -9px;
   right: 14px;
   background: var(--tag);
-  color: var(--ink);
+  color: var(--on-brand);
   font-family: var(--mono);
   font-weight: 600;
   font-size: 12px;
   padding: 3px 9px;
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   transform: rotate(-3deg);
   box-shadow: 0 1px 3px rgba(22, 23, 26, 0.18);
 }
@@ -565,7 +709,7 @@ textarea {
   height: 34px;
   object-fit: contain;
   background: var(--canvas);
-  border-radius: 2px;
+  border-radius: var(--r-sm);
   flex-shrink: 0;
 }
 
@@ -587,13 +731,24 @@ textarea {
   letter-spacing: 0.05em;
   padding: 2px 7px;
   border: 1px solid var(--line);
-  border-radius: 20px;
+  border-radius: var(--r-pill);
   color: var(--muted);
+}
+
+/* botao vestido de chip -- dias da semana e grupos no formulario de automacao */
+button.chip {
+  appearance: none;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .chip[data-tone='on'] {
   border-color: var(--gain);
   color: var(--gain);
+  background: color-mix(in srgb, var(--gain) 10%, transparent);
 }
 
 .chip[data-tone='off'] {
@@ -607,7 +762,7 @@ textarea {
   padding: 40px 24px;
   text-align: center;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface);
 }
 
 .empty strong {
@@ -650,6 +805,25 @@ textarea {
   box-shadow: var(--shadow);
 }
 
+.login__brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Amarelo sobre branco nao tem contraste: no fundo claro o mark ganha o mesmo
+   tile escuro do favicon, em vez de virar uma segunda cor de marca. */
+.login__mark {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  flex: none;
+  border-radius: var(--r);
+  background: var(--slate);
+  color: var(--brand);
+}
+
 .login h1 {
   font-size: 24px;
   letter-spacing: -0.035em;
@@ -688,6 +862,21 @@ textarea {
     flex-direction: row;
   }
 
+  .rail__group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .rail__group + .rail__group {
+    margin-top: 0;
+    margin-left: 10px;
+  }
+
+  .rail__group-label {
+    display: none;
+  }
+
   .rail__foot {
     display: none;
   }
@@ -705,5 +894,671 @@ textarea {
   * {
     transition: none !important;
     animation: none !important;
+  }
+}
+
+/* ---------------- nichos ---------------- */
+
+/* Duas colunas: catálogo à esquerda, o que entrou no nicho à direita. */
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-top: 18px;
+}
+
+.catbox {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  max-height: 380px;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.catbox__grupo + .catbox__grupo {
+  border-top: 1px solid var(--line);
+}
+
+.catbox__raiz {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  background: var(--canvas);
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.catbox__raiz span {
+  font-family: var(--mono);
+  letter-spacing: 0;
+}
+
+.catbox__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.catbox__item:hover {
+  background: var(--surface);
+}
+
+.catbox__item[data-picked='true'] {
+  background: var(--brand);
+  color: var(--on-brand);
+  font-weight: 700;
+}
+
+.catbox__item input {
+  width: auto;
+  flex: none;
+  accent-color: var(--ink);
+}
+
+.catbox__item span {
+  flex: 1;
+}
+
+.catbox__item em {
+  font-family: var(--mono);
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.picked {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.picked__item {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--brand);
+  border-radius: var(--r);
+  padding: 10px;
+  background: var(--surface);
+}
+
+.picked__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.picked__item input {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.taglist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.taglist__item {
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 3px 8px;
+  background: var(--canvas);
+}
+
+.taglist__item em {
+  font-style: normal;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+@media (max-width: 860px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------- abas de nicho ---------------- */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.tabs__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  padding: 7px 14px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tabs__item:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.tabs__item[data-on='true'] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
+  font-weight: 600;
+}
+
+.tabs__item span {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+}
+
+/* O contador vai sobre o amarelo da aba ativa: veu escuro + texto preso. */
+.tabs__item[data-on='true'] span {
+  background: rgba(22, 23, 26, 0.14);
+  color: var(--on-brand);
+}
+
+
+/* ---------------------------------------------------------------
+   Prateleira da fila
+   A etiqueta de gôndola servia pra uma lista curta e densa. Com a
+   fila cheia ela vira ruído: recorte tracejado, furo, adesivo torto
+   e a justificativa da nota aberta em toda linha competiam com o
+   que interessa — foto, preço e quanto paga. O card abaixo é limpo
+   e cabe 4 por linha.
+   --------------------------------------------------------------- */
+
+.shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 140ms ease, box-shadow 140ms ease, opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--ink) 28%, transparent);
+}
+
+.card[data-leaving='true'] {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* Poço da imagem: branco fixo nos dois temas. Foto recortada de loja
+   assume fundo branco -- seguir --surface deixaria o recorte com halo
+   escuro no tema claro e o produto flutuando no escuro. */
+.card__well {
+  position: relative;
+  aspect-ratio: 1;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.card__well img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.card__semfoto {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card__nota {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(22, 23, 26, 0.82);
+  color: #fff;
+  border-radius: var(--r-pill);
+  padding: 2px 8px;
+  cursor: help;
+}
+
+/* Badge de desconto: canto superior esquerdo do poço, vermelho sobre
+   branco fixo -- por isso fundo E texto sao literais, nao tokens. O poço
+   e branco fixo nos dois temas, entao nenhum dos dois pode seguir a
+   virada do tema: var(--drop) no escuro vira um vermelho claro pensado
+   pra ler sobre fundo escuro, nao pra carregar texto branco em cima. */
+.card__off--badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: #d93a1e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: var(--r-sm);
+  padding: 3px 7px;
+}
+
+.card__corpo {
+  padding: 12px 13px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  /* Cresce pra ocupar a altura do card: sem isso o selo "Mais vendido"
+     desalinha os botões da linha inteira. */
+  flex: 1;
+}
+
+.card__selo {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--brand);
+  color: var(--on-brand);
+  border-radius: var(--r-sm);
+  padding: 2px 6px;
+}
+
+.card__posicao {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.card__titulo {
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 0;
+  min-height: 2.7em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card__meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.card__estrela {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Comissão: é o que separa uma oferta boa de uma oferta boa PRA VOCÊ. */
+.card__ganho {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gain);
+  background: color-mix(in srgb, var(--gain) 14%, transparent);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+}
+
+.card__ganho em {
+  font-style: normal;
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+.card__precos {
+  margin-top: 2px;
+}
+
+.card__antes {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.card__linha {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.card__agora {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.card__origem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.card__nicho {
+  background: var(--brand);
+  color: var(--on-brand);
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  font-weight: 600;
+}
+
+.card__erro {
+  font-size: 12px;
+  color: var(--drop);
+  border-left: 2px solid var(--drop);
+  padding-left: 8px;
+}
+
+.card__acoes {
+  /* auto empurra as ações pro rodapé, alinhando todos os cards da linha. */
+  margin-top: auto;
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Alvo de toque de verdade: 40px é o mínimo pra não errar no celular. */
+.btn--alvo {
+  min-height: 40px;
+  padding: 8px 10px;
+  width: 100%;
+  line-height: 1.2;
+}
+
+/* Pular menor, Enviar maior: a ação frequente é a que ganha área, e a
+   separação horizontal impede que errar uma caia na outra. */
+.card__botoes {
+  display: grid;
+  grid-template-columns: 1fr 1.9fr;
+  gap: 12px;
+}
+
+.card__enviar {
+  font-size: 13.5px;
+}
+
+/* Ações secundárias em texto: mais botões cheios brigariam com o primário. */
+.card__links {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.card__links button {
+  background: none;
+  border: none;
+  padding: 6px 2px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.card__links button:hover {
+  color: var(--ink);
+}
+
+.card__links button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.card__razoes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 9px 0 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.card__razoes li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.card__razoes b {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--gain);
+  white-space: nowrap;
+}
+
+.card__razoes li[data-neg='true'] b {
+  color: var(--drop);
+}
+
+@media (max-width: 860px) {
+  /* 150px espremia os dois botões a ponto de "Enviar ao grupo" quebrar em
+     três linhas. No celular o alvo importa mais que caber mais card. */
+  .shelf {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 10px;
+  }
+
+  .card__agora {
+    font-size: 19px;
+  }
+
+  .card__botoes {
+    grid-template-columns: 1fr 1.6fr;
+    gap: 10px;
+  }
+
+  .card__enviar {
+    font-size: 12.5px;
+  }
+}
+
+/* ---------------- disparos: passo a passo e barra de progresso ---------------- */
+
+.steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.steps__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.steps__num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.steps__item[data-on='true'] {
+  color: var(--ink);
+}
+
+.steps__item[data-on='true'] .steps__num {
+  background: var(--raise);
+  border-color: var(--raise);
+  color: #fff;
+}
+
+.steps__item[data-done='true'] .steps__num {
+  background: var(--gain);
+  border-color: var(--gain);
+  color: #fff;
+}
+
+.steps__sep {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+  min-width: 20px;
+}
+
+.progress {
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--canvas);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.progress__bar {
+  height: 100%;
+  background: var(--gain);
+  transition: width 200ms ease;
+}
+
+/* ---------------------------------------------------------------
+   Modo escuro: ajuste pontual remanescente
+   --------------------------------------------------------------- */
+
+/* O poço da foto do card fica claro de propósito nos dois temas (fundo
+   neutro pra foto de loja), então o texto "sem foto" não pode seguir o
+   flip de --muted -- ficaria cinza claro sobre fundo claro. */
+[data-theme='dark'] .card__semfoto {
+  color: #74787f;
+}
+
+/* ---------------------------------------------------------------
+   Feedback de protocolo
+   Overlay central, um estado so, ~1.5s. E um efeito forte de
+   proposito: so 3 acoes disparam ele (disparo, tema, WhatsApp).
+   --------------------------------------------------------------- */
+
+.protocol {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.protocol__box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 220px;
+  padding: 26px 34px;
+  border-radius: var(--r);
+  border: 1px solid var(--protocol-accent, var(--line));
+  /* Vidro escuro fixo nos dois temas: o overlay e um estado de sistema,
+     nao uma superficie do documento. */
+  background: rgba(12, 12, 17, 0.74);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: #f2f2f0;
+  box-shadow: 0 12px 44px rgba(0, 0, 0, 0.5);
+  animation: protocol-in 160ms ease-out;
+}
+
+.protocol__icon {
+  color: var(--protocol-accent, var(--brand));
+  display: block;
+  animation: protocol-pop 420ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+.protocol__title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.protocol__subtitle {
+  font-size: 14px;
+  color: #9a9da3;
+}
+
+@keyframes protocol-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes protocol-pop {
+  0% {
+    transform: scale(0.3);
+  }
+  100% {
+    transform: scale(1);
   }
 }
