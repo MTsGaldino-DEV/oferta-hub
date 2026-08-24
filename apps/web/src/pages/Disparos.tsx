@@ -357,7 +357,7 @@ function NovoDisparo({ onCriado }: { onCriado: () => void }) {
           {grupos.length === 0 && (
             <div className="empty">
               <strong>Nenhum grupo sincronizado</strong>
-              Conecte o WhatsApp e sincronize os grupos em Conexões antes de disparar.
+              Conecte o WhatsApp e sincronize os grupos em Configurações › Canais antes de disparar.
             </div>
           )}
           <div className="field" style={{ marginBottom: 14 }}>

@@ -15,8 +15,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
   }, [location.pathname]);
 
   async function logout() {
-    await api.post('/api/logout');
-    window.location.href = '/';
+    // redireciona mesmo se a chamada falhar -- logout local e o que importa
+    try {
+      await api.post('/api/logout');
+    } finally {
+      window.location.href = '/';
+    }
   }
 
   return (

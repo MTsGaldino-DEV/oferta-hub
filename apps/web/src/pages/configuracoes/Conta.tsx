@@ -36,8 +36,12 @@ export function Conta() {
   }
 
   async function sair() {
-    await api.post('/api/logout');
-    window.location.reload();
+    // reload acontece mesmo se a chamada falhar -- logout local e o que importa
+    try {
+      await api.post('/api/logout');
+    } finally {
+      window.location.reload();
+    }
   }
 
   return (

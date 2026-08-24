@@ -1,5 +1,7 @@
 /**
- * Self-check da derivacao de senha. Roda sem banco:
+ * Self-check da derivacao de senha. Nao faz query no banco, mas importa
+ * senha.js -> env.js, que exige DATABASE_URL, MASTER_KEY, DASHBOARD_PASSWORD
+ * e SESSION_SECRET no .env -- sem isso o processo morre antes do 1o assert.
  *   npx tsx apps/api/src/plugins/senha.check.ts
  *
  * O que precisa valer: mesma senha confere, senha errada nao confere, dois

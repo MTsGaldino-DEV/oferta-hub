@@ -81,8 +81,6 @@ export function Canais() {
         </div>
       </div>
 
-      {aviso && <div className="notice">{aviso}</div>}
-
       <div className="notice">
         O envio usa uma biblioteca não oficial do WhatsApp. Pareie um <strong>chip secundário</strong>: o número
         pode ser banido, e o banimento costuma ser definitivo.
@@ -182,6 +180,8 @@ export function Canais() {
       >
         + Adicionar outro número ou bot
       </button>
+
+      {aviso && <div className="notice" style={{ marginTop: 12 }}>{aviso}</div>}
     </>
   );
 }

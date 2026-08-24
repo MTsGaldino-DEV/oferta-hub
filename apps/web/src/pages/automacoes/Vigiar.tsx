@@ -18,7 +18,7 @@ interface Rule {
   maxPrice: number | null; minDiscount: number; minCommission: number; lastRunAt: string | null;
 }
 
-/** Recorte curado de varias categorias. Gerenciado na aba Nichos. */
+/** Recorte curado de varias categorias. Semeado pelo backend por enquanto. */
 interface NichoCurado {
   id: string; name: string; minSales: number; entries: { categoryId: number }[];
 }
@@ -214,7 +214,7 @@ export function Vigiar() {
             <small>
               {nichoAtual
                 ? `${nichoAtual.entries.length} categorias, mín. ${int(nichoAtual.minSales)} vendas`
-                : 'monte e teste os nichos na aba Nichos'}
+                : 'edição manual de nichos volta em breve'}
             </small>
           </div>
           <div className="field" style={{ flex: '1 1 180px' }}>

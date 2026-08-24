@@ -200,7 +200,7 @@ export function AutomacoesLista() {
       {grupos.length === 0 && (
         <div className="empty">
           <strong>Nenhum grupo sincronizado</strong>
-          Conecte o WhatsApp e sincronize os grupos em Conexões antes de criar uma automação.
+          Conecte o WhatsApp e sincronize os grupos em Configurações › Canais antes de criar uma automação.
         </div>
       )}
 

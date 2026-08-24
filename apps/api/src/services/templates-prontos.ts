@@ -6,8 +6,10 @@ import { logger } from '../lib/logger.js';
  * vazia. Semeados por `upsert` na chave `name`, entao o texto que o usuario
  * editar depois nao e sobrescrito no boot seguinte.
  *
- * `{PRECO_ANTIGO}` some sozinho quando o produto nao tem preco de comparacao
- * -- ver services/template.ts. Por isso o "de/por" pode aparecer solto aqui.
+ * Quando o produto nao tem preco de comparacao, `services/template.ts` apaga
+ * a LINHA INTEIRA que contem `{PRECO_ANTIGO}` (nao so o token). Por isso todo
+ * modelo aqui poe `{PRECO_ANTIGO}` numa linha propria, separada de `{PRECO}`
+ * -- assim o preco atual sobrevive sozinho quando o antigo some.
  */
 export const TEMPLATES_PRONTOS: { name: string; body: string; isDefault: boolean }[] = [
   {
@@ -17,7 +19,8 @@ export const TEMPLATES_PRONTOS: { name: string; body: string; isDefault: boolean
 
 *{TITULO}*
 
-~{PRECO_ANTIGO}~ ➡️ *{PRECO}*
+~{PRECO_ANTIGO}~
+➡️ *{PRECO}*
 
 {LINK}`,
   },
@@ -28,7 +31,8 @@ export const TEMPLATES_PRONTOS: { name: string; body: string; isDefault: boolean
 
 *{TITULO}*
 
-~{PRECO_ANTIGO}~ ➡️ *{PRECO}* 🤯
+~{PRECO_ANTIGO}~
+➡️ *{PRECO}* 🤯
 
 👉 {LINK}`,
   },
@@ -39,7 +43,8 @@ export const TEMPLATES_PRONTOS: { name: string; body: string; isDefault: boolean
 
 📦 *{TITULO}*
 
-O preço caiu de ~{PRECO_ANTIGO}~ para apenas *{PRECO}* 🔥
+O preço caiu de ~{PRECO_ANTIGO}~
+Agora é apenas *{PRECO}* 🔥
 
 Pra quem já estava querendo comprar, essa pode ser uma boa hora 👀
 

@@ -10,7 +10,6 @@ import { Desempenho } from './pages/Desempenho.js';
 import { MeusGrupos } from './pages/MeusGrupos.js';
 import { Garimpar } from './pages/Garimpar.js';
 import { Automacoes } from './pages/Automacoes.js';
-import { Disparos } from './pages/Disparos.js';
 import { Configuracoes } from './pages/Configuracoes.js';
 
 function Login({ onIn }: { onIn: () => void }) {
@@ -87,7 +86,6 @@ export default function App() {
           <Route path="/grupos" element={<MeusGrupos />} />
           <Route path="/garimpar" element={<Garimpar />} />
           <Route path="/automacoes" element={<Automacoes />} />
-          <Route path="/disparos" element={<Disparos />} />
           <Route path="/configuracoes" element={<Configuracoes />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
