@@ -57,7 +57,17 @@ export function CategoriaMultiSelect({ arvore, selecionadas, onChange }: Props) 
       {noLimite && <div className="notice">Limite de {LIMITE} categorias por busca atingido.</div>}
 
       <div className="catbox">
-        {visivel.length === 0 && <div className="empty">Nenhuma categoria com esse nome.</div>}
+        {/* arvore vazia sem filtro digitado quer dizer catalogo nunca sincronizado,
+            nao "sem resultado pro filtro" -- textos diferentes pra cada caso */}
+        {visivel.length === 0 && arvore.length === 0 && !filtro.trim() && (
+          <div className="empty">
+            O catálogo de categorias ainda não foi carregado. A busca por palavra-chave funciona normalmente
+            enquanto isso.
+          </div>
+        )}
+        {visivel.length === 0 && (arvore.length > 0 || filtro.trim()) && (
+          <div className="empty">Nenhuma categoria com esse nome.</div>
+        )}
         {visivel.map((r) => (
           <div key={r.id} className="catbox__grupo">
             <div className="catbox__raiz">
