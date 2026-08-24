@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { DisparoItemStatus } from '@prisma/client';
 import { prisma } from '../db.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -35,14 +36,21 @@ export async function groupRoutes(app: FastifyInstance) {
           by: ['groupJid'],
           _min: { occurredAt: true },
         }),
+        // Exclui oferta que ja tem item de disparo SENT -- envio em massa
+        // grava as duas linhas (Offer.sentAt e DisparoItem.sentAt) para a
+        // mesma mensagem, e sem esse exists:false o total dobra.
         prisma.offer.groupBy({
           by: ['groupJid'],
-          where: { groupJid: { not: null }, sentAt: { gte: since } },
+          where: {
+            groupJid: { not: null },
+            sentAt: { gte: since },
+            disparoItems: { none: { status: DisparoItemStatus.SENT } },
+          },
           _count: true,
         }),
         prisma.disparoItem.groupBy({
           by: ['groupJid'],
-          where: { sentAt: { gte: since } },
+          where: { status: DisparoItemStatus.SENT, sentAt: { gte: since } },
           _count: true,
         }),
       ]);
