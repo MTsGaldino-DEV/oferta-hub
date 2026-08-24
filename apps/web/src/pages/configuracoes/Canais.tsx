@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { useProtocolToast } from '../../components/ProtocolToast.js';
 
-// Mesma forma que Conexoes.tsx usava.
+// Mesma forma que o WhatsApp usava em Conexoes.tsx antes de ser movido pra cá.
 interface WaStatus {
   status: 'disconnected' | 'connecting' | 'qr' | 'connected';
   qr: string | null;

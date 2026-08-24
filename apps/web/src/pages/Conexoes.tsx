@@ -49,8 +49,8 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
     <div className="panel">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 16 }}>{info.label}</strong>
-        <span className="chip" data-tone={info.connected ? 'on' : undefined}>
-          {info.connected ? 'Conectado' : 'Pendente'}
+        <span className="chip" data-tone={info.connected ? (info.lastError ? 'off' : 'on') : undefined}>
+          {info.connected ? (info.lastError ? 'Com erro' : 'Conectado') : 'Pendente'}
         </span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           {info.connected && (
