@@ -34,7 +34,7 @@ Para as próximas conversas:
 |---|---|
 | Início | Visão geral · Fila |
 | Garimpar | (página única) |
-| Automações | Disparos · Automatizar |
+| Automações | Disparos · Automatizar · Vigiar |
 | Métricas | Desempenho · Meus Grupos |
 | Configurações | Canais · Plataformas · Mensagens · Cupons · Conta |
 
@@ -42,7 +42,8 @@ Início e Métricas aparecem como grupo rotulado na barra lateral, com os dois
 itens visíveis. Automações e Configurações são um item só, com as abas dentro
 da página.
 
-Rotas removidas: `/agenda`, `/nichos`, `/produtos`.
+Rotas removidas: `/agenda`, `/nichos`, `/produtos`. O conteúdo de
+`/produtos` não é descartado: vira a aba Vigiar dentro de Automações.
 
 ## Arquitetura
 
@@ -63,46 +64,60 @@ tela branca.
 
 ### Automações
 
-`Automacoes.tsx` (391 linhas) passa a ser uma casca com duas abas, no mesmo
+`Automacoes.tsx` (391 linhas) passa a ser uma casca com três abas, no mesmo
 padrão que `Configuracoes.tsx` usa hoje:
 
 - **Disparos** — renderiza `Disparos.tsx` sem alteração. É a aba inicial.
 - **Automatizar** — o conteúdo atual de `Automacoes.tsx`, extraído para
   `apps/web/src/pages/automacoes/AutomacoesLista.tsx`.
+- **Vigiar** — o conteúdo atual de `Produtos.tsx`, movido para
+  `apps/web/src/pages/automacoes/Vigiar.tsx`.
 
-A extração é um recorte mecânico: o corpo atual vira o novo arquivo, e
-`Automacoes.tsx` fica só com o estado da aba e os dois `import`.
+As duas extrações são recortes mecânicos: o corpo atual de cada página vira o
+novo arquivo, e `Automacoes.tsx` fica só com o estado da aba e os três
+`import`.
 
-### Vigia de preço
+### Vigia de preço e garimpo automático
 
-O formulário de `Produtos.tsx` (adicionar item vigiado, teto de preço,
-percentual mínimo de queda) migra para dentro do formulário de nova
-automação, como um bloco opcional "vigiar preço deste produto". As rotas
-`/api/watch` permanecem intactas — muda só onde o formulário vive.
+A página `Produtos.tsx` ("Preços vigiados") mistura dois assuntos que batem em
+models diferentes:
 
-`Produtos.tsx` só é deletado depois que o bloco novo estiver funcionando, e a
-lista de itens vigiados passa a ser exibida dentro da aba Automatizar.
+- "Vigiar um produto" cria `WatchItem` — uma URL específica, monitorada por
+  queda de preço.
+- "Garimpo automático" cria `DiscoveryRule` — palavra-chave mais loja, que
+  varre e joga achados na fila.
+
+Nenhum dos dois é `AutomationRule`, que é o que a aba Automatizar edita.
+Fundir os três num único formulário juntaria conceitos distintos numa tela só,
+então os dois blocos ficam juntos na aba Vigiar, sem reescrita. O que a fase
+entrega é a saída da barra lateral, não a fusão dos formulários.
+
+As rotas `/api/watch` e `/api/discovery` permanecem intactas.
 
 ### Configurações
 
 `Configuracoes.tsx` passa de duas para cinco abas. Cada aba é um componente
 em `apps/web/src/pages/configuracoes/`:
 
-1. **Canais** (`Canais.tsx`) — novo. Card do WhatsApp com status da conexão e
-   ação de conectar/desconectar, reaproveitando os endpoints que
-   `Conexoes.tsx` já usa. Card do Telegram desabilitado, marcado "Em breve".
-   Abaixo, um botão "Adicionar outro número ou bot" que abre um aviso de
-   indisponibilidade — o backend mantém uma sessão Baileys única, e suportar
-   várias é trabalho de outra fase.
-2. **Plataformas** (`Conexoes.tsx`) — a página atual, reorganizada em um card
-   por loja, com selo "Conectado" ou "Pendente" no canto, campos da
-   credencial, e os botões "Salvar" e "Validar conexão".
+1. **Canais** (`Canais.tsx`) — o card do WhatsApp que hoje vive em
+   `Conexoes.tsx:188-272` (status, QR, sincronizar grupos, grupo padrão,
+   sair), movido para cá sem reescrever a lógica. Ao lado, um card do Telegram
+   desabilitado, marcado "Em breve". Abaixo, um botão "Adicionar outro número
+   ou bot" que abre um aviso de indisponibilidade — o backend mantém uma
+   sessão Baileys única, e suportar várias é trabalho de outra fase.
+2. **Plataformas** (`Conexoes.tsx`) — a página atual **sem** o card do
+   WhatsApp, reorganizada em um card por loja, com selo "Conectado" ou
+   "Pendente" no canto, campos da credencial, e os botões "Salvar" e "Validar
+   conexão". Os cards de Aparência (`Conexoes.tsx:274`) e Extensão
+   (`Conexoes.tsx:309`) descem para a aba Conta, onde ajuste pessoal faz mais
+   sentido que credencial de loja.
 3. **Mensagens** (`Templates.tsx`) — a página atual, mais uma faixa de cinco
    presets clicáveis acima do editor.
 4. **Cupons** (`Cupons.tsx`) — novo, apenas um estado vazio explicando que a
    função chega depois.
 5. **Conta** (`Conta.tsx`) — novo. Nome, e-mail e plano como texto estático.
-   Formulário de troca de senha funcional. Botão de sair.
+   Formulário de troca de senha funcional. Botão de sair. Recebe também os
+   cards de Aparência e Extensão vindos de `Conexoes.tsx`.
 
 ### Presets de mensagem
 
@@ -175,8 +190,9 @@ Verificação por etapa:
 - Trocar a senha, ser deslogado, e entrar com a nova.
 - Após a troca, a senha antiga do `.env` deixa de funcionar.
 - Os cinco presets aparecem em Mensagens e carregam no editor ao clique.
-- Criar uma automação com o bloco de vigia de preço preenchido e conferir que
-  o `WatchItem` foi criado.
+- Na aba Vigiar, cadastrar um item vigiado e conferir que o `WatchItem` foi
+  criado; cadastrar uma regra de garimpo e conferir o `DiscoveryRule`.
+- Na aba Canais, o WhatsApp conecta e desconecta como fazia em Conexões.
 
 A lógica de derivação e comparação de senha ganha uma verificação executável
 em `apps/api/src/plugins/auth.check.ts`, no mesmo estilo de
