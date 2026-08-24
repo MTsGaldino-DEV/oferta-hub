@@ -91,7 +91,6 @@ Criar `apps/api/src/plugins/senha.ts`:
 ```ts
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
-import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 
