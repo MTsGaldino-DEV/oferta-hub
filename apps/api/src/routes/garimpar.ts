@@ -22,7 +22,7 @@ const query = z
     categoryIds: listaDeIds,
     sort: z.enum(['relevancia', 'vendas', 'comissao', 'menor-preco', 'desconto']).default('vendas'),
     minCommissionPct: z.coerce.number().min(0).max(100).optional(),
-    maxPrice: z.coerce.number().positive().optional(),
+    maxPrice: z.coerce.number().positive('O preço deve ser maior que zero.').optional(),
     // Nao usar z.coerce.boolean aqui: ele transforma a string "false" em true,
     // porque toda string nao vazia e truthy. So a string "true" liga o filtro.
     keySeller: z
