@@ -195,6 +195,6 @@ Verificação por etapa:
 - Na aba Canais, o WhatsApp conecta e desconecta como fazia em Conexões.
 
 A lógica de derivação e comparação de senha ganha uma verificação executável
-em `apps/api/src/plugins/auth.check.ts`, no mesmo estilo de
+em `apps/api/src/plugins/senha.check.ts`, no mesmo estilo de
 `apps/web/src/protocol-sound.check.ts`: derivar, comparar certo e errado,
 falhar com `assert` se quebrar.
