@@ -62,7 +62,12 @@ export async function garimparRoutes(app: FastifyInstance) {
   app.get('/api/garimpar/produtos', async (req, reply) => {
     const q = query.parse(req.query);
     const shopee = connectors[Platform.SHOPEE];
-    const buscar = shopee.searchPage ?? (async (p) => ({ produtos: await shopee.search(p), hasNextPage: false }));
+    const buscar =
+      shopee.searchPage ??
+      (async (p) => {
+        const produtos = await shopee.search(p);
+        return { produtos, hasNextPage: false, antesDoFiltro: produtos.length };
+      });
 
     const base = {
       keyword: q.keyword,
@@ -84,12 +89,14 @@ export async function garimparRoutes(app: FastifyInstance) {
     const listas: NormalizedProduct[][] = [];
     const falhas: { categoryId: number | null; motivo: string }[] = [];
     let bruto = 0;
+    let antesDoFiltro = 0;
     let hasNextPage = false;
 
     respostas.forEach((r, i) => {
       if (r.status === 'fulfilled') {
         listas.push(r.value.produtos);
         bruto += r.value.produtos.length;
+        antesDoFiltro += r.value.antesDoFiltro;
         // Com varias categorias, basta uma ter mais pagina pra valer avancar.
         hasNextPage = hasNextPage || r.value.hasNextPage;
       } else {
@@ -121,6 +128,9 @@ export async function garimparRoutes(app: FastifyInstance) {
         nome: cats.find((c) => c.externalId === id)?.nameBr ?? `Categoria ${id}`,
       })),
       bruto,
+      // Distinto de bruto: antesDoFiltro conta antes do corte de preco/comissao
+      // do conector, bruto conta depois dele e antes so do dedupe/merge.
+      antesDoFiltro,
       produtos: mesclar(listas, q.sort, q.limit).map(serialize),
       pageInfo: { page: q.page, hasNextPage },
       falhas,

@@ -16,6 +16,7 @@ export interface Produto {
 export interface Resultado {
   categorias: { id: number; nome: string }[];
   bruto: number;
+  antesDoFiltro: number;
   produtos: Produto[];
   pageInfo: { page: number; hasNextPage: boolean };
   falhas: { categoryId: number | null; motivo: string }[];

@@ -179,6 +179,9 @@ export const shopee: Connector = {
     );
 
     let produtos: NormalizedProduct[] = (data.productOfferV2?.nodes ?? []).map(normalize);
+    // Contagem antes dos filtros de preco/comissao, pra tela distinguir "a
+    // Shopee nao devolveu nada" de "devolveu, mas o filtro cortou tudo".
+    const antesDoFiltro = produtos.length;
 
     if (maxPrice) {
       produtos = produtos.filter((p) => p.price !== undefined && p.price <= maxPrice);
@@ -199,6 +202,7 @@ export const shopee: Connector = {
     return {
       produtos: produtos.slice(0, limit),
       hasNextPage: Boolean(data.productOfferV2?.pageInfo?.hasNextPage),
+      antesDoFiltro,
     };
   },
 

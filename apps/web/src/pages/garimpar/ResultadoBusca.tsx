@@ -64,8 +64,8 @@ export function ResultadoBusca({ resultado, buscando, onPagina }: Props) {
         )}
         <div className="empty">
           <strong>Nada sobrou</strong>
-          {resultado.bruto > 0
-            ? `A Shopee devolveu ${int(resultado.bruto)} itens, mas os filtros cortaram todos. Tente baixar a comissão mínima ou subir o teto de preço.`
+          {resultado.antesDoFiltro > 0
+            ? `A Shopee devolveu ${int(resultado.antesDoFiltro)} itens, mas os filtros cortaram todos. Tente baixar a comissão mínima ou subir o teto de preço.`
             : 'A Shopee não devolveu nada pra essa combinação.'}
         </div>
       </>

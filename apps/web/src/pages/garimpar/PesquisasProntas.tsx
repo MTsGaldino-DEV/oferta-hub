@@ -129,6 +129,10 @@ export function PesquisasProntas() {
             resultado={{
               categorias: teste.dados.porCategoria.map((c) => ({ id: c.categoryId, nome: c.nome })),
               bruto: teste.dados.bruto,
+              // Aqui bruto e antesDoFiltro sao o mesmo numero: o endpoint de
+              // nicho ja devolve bruto como "antes do filtro de termos", que e
+              // exatamente o que antesDoFiltro representa na busca ao vivo.
+              antesDoFiltro: teste.dados.bruto,
               produtos: teste.dados.produtos,
               // O endpoint de nicho nao pagina: ele varre as categorias do
               // nicho de uma vez. Sem proxima pagina pra oferecer.

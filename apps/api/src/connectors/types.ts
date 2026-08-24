@@ -85,7 +85,12 @@ export interface Connector {
    * Busca sabendo se ha proxima pagina. Opcional: so a Shopee expoe pageInfo,
    * e sem isso a tela nao consegue desabilitar o botao de avancar.
    */
-  searchPage?(params: SearchParams): Promise<{ produtos: NormalizedProduct[]; hasNextPage: boolean }>;
+  searchPage?(params: SearchParams): Promise<{
+    produtos: NormalizedProduct[];
+    hasNextPage: boolean;
+    /** Quantos itens a API devolveu antes dos filtros de preco/comissao. */
+    antesDoFiltro: number;
+  }>;
   /**
    * Transforma a URL limpa em link de afiliado rastreado.
    * `subId` e o carimbo que volta no relatorio de vendas da loja e liga a

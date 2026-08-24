@@ -1,4 +1,4 @@
-import { OfferSource, type Offer } from '@prisma/client';
+import { OfferSource, OfferStatus, type Offer } from '@prisma/client';
 import { prisma, num } from '../db.js';
 import { shortCode } from '../lib/ids.js';
 import { logger } from '../lib/logger.js';
@@ -114,6 +114,17 @@ export async function ingestProduct(
   const { note, linkPronto, nicheId } = opcoes;
   const connector = connectors[found.platform];
   const product = await upsertProduct(found);
+
+  // A fila nao ganha nada com duas ofertas pendentes do mesmo produto -- so
+  // duplica trabalho de revisao. So PENDING bloqueia: uma oferta ja enviada,
+  // pulada ou falhada nao impede nascer uma nova (o preco pode ter caido de
+  // novo). Confere antes do link de afiliado pra nao gastar chamada de API
+  // da loja num clique repetido.
+  const pendente = await prisma.offer.findFirst({
+    where: { productId: product.id, status: OfferStatus.PENDING },
+  });
+  if (pendente) return pendente;
+
   const price = found.price ?? 0;
 
   const scored = await scoreOffer({
