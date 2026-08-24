@@ -67,7 +67,13 @@ export function passaNoFiltro(
  */
 export async function buscarPorNicho(
   nicho: NichoParaBusca,
-  opcoes: { porCategoria?: number; maxPrice?: number; limiarDedup?: number } = {},
+  opcoes: {
+    porCategoria?: number;
+    maxPrice?: number;
+    limiarDedup?: number;
+    minCommissionPct?: number;
+    keySeller?: boolean;
+  } = {},
 ): Promise<{ achados: AchadoDoNicho[]; resumo: BuscaNichoSummary }> {
   const connector = connectors[nicho.platform];
   const porCategoria = opcoes.porCategoria ?? 50;
@@ -82,6 +88,8 @@ export async function buscarPorNicho(
       const produtos = await connector.search({
         categoryId: entry.categoryId,
         maxPrice: opcoes.maxPrice,
+        minCommissionPct: opcoes.minCommissionPct,
+        keySeller: opcoes.keySeller,
         sort: 'vendas',
         limit: porCategoria,
       });

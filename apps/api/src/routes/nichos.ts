@@ -151,43 +151,56 @@ export async function nichoRoutes(app: FastifyInstance) {
    * categoria. E aqui que voce ve se o recorte esta pegando lixo antes de
    * deixar uma regra rodando sozinha.
    */
-  app.post<{ Params: { id: string }; Body: { maxPrice?: number } }>(
-    '/api/nichos/:id/testar',
-    async (req, reply) => {
-      const nicho = await carregarNicho(req.params.id);
-      if (!nicho) return reply.code(404).send({ error: 'Nicho nao encontrado.' });
+  app.post<{
+    Params: { id: string };
+    Body: { maxPrice?: number; minCommissionPct?: number; keySeller?: boolean };
+  }>('/api/nichos/:id/testar', async (req, reply) => {
+    const nicho = await carregarNicho(req.params.id);
+    if (!nicho) return reply.code(404).send({ error: 'Nicho nao encontrado.' });
 
-      const { maxPrice } = z.object({ maxPrice: z.number().positive().optional() }).parse(req.body ?? {});
-      const { achados, resumo } = await buscarPorNicho(nicho, { maxPrice, porCategoria: 50 });
+    const { maxPrice, minCommissionPct, keySeller } = z
+      .object({
+        maxPrice: z.number().positive().optional(),
+        minCommissionPct: z.number().min(0).max(100).optional(),
+        keySeller: z.boolean().optional(),
+      })
+      .parse(req.body ?? {});
+    const { achados, resumo } = await buscarPorNicho(nicho, {
+      maxPrice,
+      minCommissionPct,
+      keySeller,
+      porCategoria: 50,
+    });
 
-      const cats = await prisma.category.findMany({
-        where: { externalId: { in: resumo.porCategoria.map((c) => c.categoryId) } },
-      });
-      const nomeDe = new Map(cats.map((c) => [c.externalId, c.nameBr]));
+    const cats = await prisma.category.findMany({
+      where: { externalId: { in: resumo.porCategoria.map((c) => c.categoryId) } },
+    });
+    const nomeDe = new Map(cats.map((c) => [c.externalId, c.nameBr]));
 
-      return {
-        ok: true,
-        bruto: resumo.bruto,
-        aceitos: resumo.aceitos,
-        repetidos: resumo.repetidos,
-        porCategoria: resumo.porCategoria.map((c) => ({
-          ...c,
-          nome: nomeDe.get(c.categoryId) ?? `Categoria ${c.categoryId}`,
-        })),
-        produtos: achados.slice(0, 40).map((a) => ({
-          externalId: a.produto.externalId,
-          platform: a.produto.platform,
-          title: a.produto.title,
-          imageUrl: a.produto.imageUrl,
-          price: a.produto.price,
-          listPrice: a.produto.listPrice,
-          commissionPct: a.produto.commissionPct,
-          soldCount: a.produto.soldCount,
-          rating: a.produto.rating,
-          categoryId: a.categoryId,
-          categoria: nomeDe.get(a.categoryId) ?? null,
-        })),
-      };
-    },
-  );
+    return {
+      ok: true,
+      bruto: resumo.bruto,
+      aceitos: resumo.aceitos,
+      repetidos: resumo.repetidos,
+      porCategoria: resumo.porCategoria.map((c) => ({
+        ...c,
+        nome: nomeDe.get(c.categoryId) ?? `Categoria ${c.categoryId}`,
+      })),
+      produtos: achados.slice(0, 40).map((a) => ({
+        externalId: a.produto.externalId,
+        platform: a.produto.platform,
+        title: a.produto.title,
+        imageUrl: a.produto.imageUrl,
+        price: a.produto.price,
+        listPrice: a.produto.listPrice,
+        commissionPct: a.produto.commissionPct,
+        sellerCommissionPct: a.produto.sellerCommissionPct ?? null,
+        commissionBrl: a.produto.commissionBrl ?? null,
+        soldCount: a.produto.soldCount,
+        rating: a.produto.rating,
+        categoryId: a.categoryId,
+        categoria: nomeDe.get(a.categoryId) ?? null,
+      })),
+    };
+  });
 }
