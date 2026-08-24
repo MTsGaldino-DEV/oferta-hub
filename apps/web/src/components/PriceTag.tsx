@@ -48,7 +48,21 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
   const desconto = offer.discountPct ? Math.round(offer.discountPct) : 0;
 
   return (
-    <article className="card" data-leaving={leaving}>
+    <article
+      className="card"
+      data-leaving={leaving}
+      role="button"
+      tabIndex={0}
+      title="Clique para ver e editar o texto da mensagem"
+      aria-label={`Ver e editar o texto de ${offer.product.title}`}
+      onClick={() => onEdit(offer)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onEdit(offer);
+        }
+      }}
+    >
       <div className="card__well">
         {offer.product.imageUrl ? (
           <img src={offer.product.imageUrl} alt="" loading="lazy" />
@@ -107,16 +121,36 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
             um deslize de 2px pro lado errado manda a oferta pro grupo. */}
         <div className="card__acoes">
           <div className="card__botoes">
-            <button className="btn btn--ghost btn--alvo" disabled={busy !== null} onClick={() => void act('skip')}>
+            <button
+              className="btn btn--ghost btn--alvo"
+              disabled={busy !== null}
+              onClick={(e) => {
+                e.stopPropagation();
+                void act('skip');
+              }}
+            >
               {busy === 'skip' ? '...' : 'Pular'}
             </button>
-            <button className="btn btn--alvo card__enviar" disabled={busy !== null} onClick={() => void act('send')}>
+            <button
+              className="btn btn--alvo card__enviar"
+              disabled={busy !== null}
+              onClick={(e) => {
+                e.stopPropagation();
+                void act('send');
+              }}
+            >
               {busy === 'send' ? 'Enviando...' : 'Enviar ao grupo'}
             </button>
           </div>
           <div className="card__links">
-            <button onClick={() => onEdit(offer)}>Ver texto</button>
-            <button onClick={() => setPorque((v) => !v)}>{porque ? 'Fechar' : 'Por quê?'}</button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setPorque((v) => !v);
+              }}
+            >
+              {porque ? 'Fechar' : 'Por quê?'}
+            </button>
           </div>
         </div>
 

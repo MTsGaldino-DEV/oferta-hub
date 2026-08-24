@@ -44,6 +44,9 @@ export function Fila() {
   const [editing, setEditing] = useState<Offer | null>(null);
   const [draft, setDraft] = useState('');
 
+  // Fechado por padrao: adicionar a mao e a excecao, ver a fila e a regra.
+  const [abrindoForm, setAbrindoForm] = useState(false);
+
   async function load(filtro = aba) {
     setLoading(true);
     try {
@@ -245,96 +248,111 @@ export function Fila() {
       {error && <div className="notice">{error}</div>}
       {aviso && <div className="notice" data-tone="warn">{aviso}</div>}
 
-      <div className="panel panel--hero">
-        <h2 className="panel__title">Adicionar oferta</h2>
-        <div className="row">
-          <div className="field" style={{ flex: '2 1 340px' }}>
-            <label htmlFor="url">Cole o link do produto</label>
-            <input
-              id="url"
-              value={url}
-              placeholder="https://www.amazon.com.br/dp/..."
-              onChange={(e) => setUrl(e.target.value)}
-            />
-          </div>
-          <div className="field" style={{ flex: '1 1 220px' }}>
-            <label htmlFor="note">Comentário seu (opcional)</label>
-            <input
-              id="note"
-              value={note}
-              placeholder="Estoque baixo, corre"
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </div>
-          <button className="btn" disabled={!url.trim() || adding} onClick={() => void addUrl()}>
-            {adding ? 'Buscando...' : 'Capturar'}
-          </button>
-        </div>
+      <div className="panel">
+        <button
+          type="button"
+          className="acordeao"
+          aria-expanded={abrindoForm}
+          onClick={() => setAbrindoForm((v) => !v)}
+        >
+          <span className="acordeao__seta" data-aberto={abrindoForm} aria-hidden="true">
+            ▸
+          </span>
+          Adicionar oferta
+        </button>
 
-        <div className="row" style={{ marginTop: 18 }}>
-          <div className="field" style={{ flex: '2 1 340px' }}>
-            <label htmlFor="term">Ou garimpe agora nas lojas conectadas</label>
-            <input
-              id="term"
-              value={term}
-              placeholder="air fryer 5 litros"
-              onChange={(e) => setTerm(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && term.trim().length > 1 && void search()}
-            />
-          </div>
-          <button className="btn btn--ghost" disabled={term.trim().length < 2 || searching} onClick={() => void search()}>
-            {searching ? 'Procurando...' : 'Procurar'}
-          </button>
-        </div>
+        {abrindoForm && (
+          <div className="acordeao__corpo">
+            <div className="row">
+              <div className="field" style={{ flex: '2 1 340px' }}>
+                <label htmlFor="url">Cole o link do produto</label>
+                <input
+                  id="url"
+                  value={url}
+                  placeholder="https://www.amazon.com.br/dp/..."
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </div>
+              <div className="field" style={{ flex: '1 1 220px' }}>
+                <label htmlFor="note">Comentário seu (opcional)</label>
+                <input
+                  id="note"
+                  value={note}
+                  placeholder="Estoque baixo, corre"
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+              <button className="btn" disabled={!url.trim() || adding} onClick={() => void addUrl()}>
+                {adding ? 'Buscando...' : 'Capturar'}
+              </button>
+            </div>
 
-        {found && (
-          <table className="table" style={{ marginTop: 16 }}>
-            <thead>
-              <tr>
-                <th>Produto</th>
-                <th className="num">Preço</th>
-                <th className="num">Comissão</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {found.filter((f) => !f.ok).map((f, i) => (
-                <tr key={`err-${i}`}>
-                  <td colSpan={4} style={{ color: 'var(--muted)', fontSize: 13 }}>
-                    {STORE[f.platform]}: {f.error}
-                  </td>
-                </tr>
-              ))}
-              {found.filter((f) => f.ok).map((f) => (
-                <tr key={`${f.platform}-${f.externalId}`}>
-                  <td>
-                    <div className="cell-product">
-                      {f.imageUrl && <img src={f.imageUrl} alt="" loading="lazy" />}
-                      <span>
-                        {f.title}
-                        <br />
-                        <small style={{ color: 'var(--muted)' }}>{STORE[f.platform]}</small>
-                      </span>
-                    </div>
-                  </td>
-                  <td className="num">{brl(f.price)}</td>
-                  <td className="num">{f.commissionPct ? `${f.commissionPct.toFixed(1)}%` : '—'}</td>
-                  <td className="num">
-                    <button className="btn btn--ghost btn--sm" onClick={() => void queueFound(f)}>
-                      Pra fila
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {found.filter((f) => f.ok).length === 0 && (
-                <tr>
-                  <td colSpan={4} style={{ color: 'var(--muted)' }}>
-                    Nenhum produto voltou dessa busca.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+            <div className="row" style={{ marginTop: 18 }}>
+              <div className="field" style={{ flex: '2 1 340px' }}>
+                <label htmlFor="term">Ou garimpe agora nas lojas conectadas</label>
+                <input
+                  id="term"
+                  value={term}
+                  placeholder="air fryer 5 litros"
+                  onChange={(e) => setTerm(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && term.trim().length > 1 && void search()}
+                />
+              </div>
+              <button className="btn btn--ghost" disabled={term.trim().length < 2 || searching} onClick={() => void search()}>
+                {searching ? 'Procurando...' : 'Procurar'}
+              </button>
+            </div>
+
+            {found && (
+              <table className="table" style={{ marginTop: 16 }}>
+                <thead>
+                  <tr>
+                    <th>Produto</th>
+                    <th className="num">Preço</th>
+                    <th className="num">Comissão</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {found.filter((f) => !f.ok).map((f, i) => (
+                    <tr key={`err-${i}`}>
+                      <td colSpan={4} style={{ color: 'var(--muted)', fontSize: 13 }}>
+                        {STORE[f.platform]}: {f.error}
+                      </td>
+                    </tr>
+                  ))}
+                  {found.filter((f) => f.ok).map((f) => (
+                    <tr key={`${f.platform}-${f.externalId}`}>
+                      <td>
+                        <div className="cell-product">
+                          {f.imageUrl && <img src={f.imageUrl} alt="" loading="lazy" />}
+                          <span>
+                            {f.title}
+                            <br />
+                            <small style={{ color: 'var(--muted)' }}>{STORE[f.platform]}</small>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="num">{brl(f.price)}</td>
+                      <td className="num">{f.commissionPct ? `${f.commissionPct.toFixed(1)}%` : '—'}</td>
+                      <td className="num">
+                        <button className="btn btn--ghost btn--sm" onClick={() => void queueFound(f)}>
+                          Pra fila
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {found.filter((f) => f.ok).length === 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ color: 'var(--muted)' }}>
+                        Nenhum produto voltou dessa busca.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
       </div>
 

@@ -429,6 +429,42 @@ textarea {
   text-decoration: none;
 }
 
+/* Cabecalho do formulario colapsavel: mesmo peso visual de um controle
+   qualquer. O amarelo da marca fica reservado pra acao principal, que e
+   enviar -- nao pra abrir um formulario. */
+.acordeao {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+
+.acordeao:hover {
+  color: var(--brand);
+}
+
+.acordeao__seta {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--muted);
+}
+
+.acordeao__seta[data-aberto='true'] {
+  transform: rotate(90deg);
+}
+
+.acordeao__corpo {
+  margin-top: 14px;
+}
+
 .row {
   display: flex;
   gap: 10px;
@@ -1117,6 +1153,10 @@ button.chip {
   border-color: color-mix(in srgb, var(--ink) 28%, transparent);
 }
 
+.card[role='button'] {
+  cursor: pointer;
+}
+
 .card[data-leaving='true'] {
   opacity: 0;
   transform: translateY(-8px);
@@ -1336,6 +1376,20 @@ button.chip {
 
 .card__enviar {
   font-size: 13.5px;
+}
+
+/* A cor no hover carrega significado: amarelo leva a oferta adiante, vermelho
+   descarta. Sem isso os dois botoes reagem igual e a mao erra sem aviso. */
+.card__enviar:hover:not(:disabled) {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #000;
+}
+
+.card__botoes .btn--ghost:hover:not(:disabled) {
+  background: var(--drop);
+  border-color: var(--drop);
+  color: #000;
 }
 
 /* Ações secundárias em texto: mais botões cheios brigariam com o primário. */
