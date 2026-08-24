@@ -49,6 +49,11 @@ function normalize(node: any): NormalizedProduct {
     price,
     listPrice: listPrice ? Number(listPrice.toFixed(2)) : undefined,
     commissionPct: node.commissionRate ? Number(node.commissionRate) * 100 : undefined,
+    // A Shopee manda comissao como fracao (0.53 = 53%), mesma escala de
+    // commissionRate -- por isso os dois multiplicam por 100 aqui.
+    sellerCommissionPct: node.sellerCommissionRate ? Number(node.sellerCommissionRate) * 100 : undefined,
+    commissionBrl: node.commission ? Number(node.commission) : undefined,
+    shopType: node.shopType !== undefined && node.shopType !== null ? Number(node.shopType) : undefined,
     rating: node.ratingStar ? Number(node.ratingStar) : undefined,
     // A Shopee nao expoe numero de avaliacoes, so de vendas. Mantemos o valor
     // tambem em reviewCount porque a nota de reputacao ainda le esse campo --
@@ -63,6 +68,7 @@ function normalize(node: any): NormalizedProduct {
 const PRODUCT_FIELDS = `
   itemId shopId productName imageUrl productLink offerLink price priceMin
   priceDiscountRate commissionRate ratingStar sales productCatIds
+  sellerCommissionRate shopeeCommissionRate commission shopType
 `;
 
 /**
@@ -131,39 +137,71 @@ export const shopee: Connector = {
    * o teto de maxPrice e aplicado aqui, sobre um lote maior que o pedido pra
    * sobrar resultado depois do corte.
    */
-  async search({ keyword, categoryId, maxPrice, sort = 'vendas', limit = 20 }) {
+  async searchPage({
+    keyword,
+    categoryId,
+    maxPrice,
+    minCommissionPct,
+    keySeller,
+    sort = 'vendas',
+    limit = 20,
+    page = 1,
+  }) {
     if (!keyword && !categoryId) throw new Error('Informe um nicho ou uma palavra-chave.');
 
-    // Com teto de preco pede lote maior pra sobrar resultado depois do corte.
-    // 50 e o maximo que a Shopee aceita por pagina.
-    const lote = Math.min(maxPrice ? limit * 3 : limit, 50);
+    // Com teto de preco ou piso de comissao pede lote maior pra sobrar
+    // resultado depois do corte. 50 e o maximo que a Shopee aceita por pagina.
+    const cortaNoCliente = Boolean(maxPrice || minCommissionPct);
+    const lote = Math.min(cortaNoCliente ? limit * 3 : limit, 50);
+
     const filtros = [
       categoryId ? `productCatId: ${categoryId}` : '',
       keyword ? `keyword: $keyword` : '',
+      keySeller ? `isKeySeller: true` : '',
       `sortType: ${SORT_TYPE[sort]}`,
+      `page: $page`,
       `limit: $limit`,
     ]
       .filter(Boolean)
       .join(', ');
 
     const data = await gql<any>(
-      `query (${keyword ? '$keyword: String!, ' : ''}$limit: Int) {
-        productOfferV2(${filtros}) { nodes { ${PRODUCT_FIELDS} } }
+      `query (${keyword ? '$keyword: String!, ' : ''}$limit: Int, $page: Int) {
+        productOfferV2(${filtros}) {
+          nodes { ${PRODUCT_FIELDS} }
+          pageInfo { hasNextPage }
+        }
       }`,
-      keyword ? { keyword, limit: lote } : { limit: lote },
+      keyword ? { keyword, limit: lote, page } : { limit: lote, page },
     );
 
-    const produtos: NormalizedProduct[] = (data.productOfferV2?.nodes ?? []).map(normalize);
-    const dentroDoTeto = maxPrice
-      ? produtos.filter((p: NormalizedProduct) => p.price !== undefined && p.price <= maxPrice)
-      : produtos;
+    let produtos: NormalizedProduct[] = (data.productOfferV2?.nodes ?? []).map(normalize);
+
+    if (maxPrice) {
+      produtos = produtos.filter((p) => p.price !== undefined && p.price <= maxPrice);
+    }
+    if (minCommissionPct) {
+      // Sem o campo o produto nao prova que atinge o piso, entao fica fora.
+      produtos = produtos.filter(
+        (p) => p.sellerCommissionPct !== undefined && p.sellerCommissionPct >= minCommissionPct,
+      );
+    }
 
     // A API nao tem ordenacao por desconto. Puxamos por vendas e reordenamos
     // aqui -- ordenar so por desconto traria o catalogo parado com "de/por" inflado.
     if (sort === 'desconto') {
-      dentroDoTeto.sort((a, b) => descontoPct(b) - descontoPct(a));
+      produtos.sort((a, b) => descontoPct(b) - descontoPct(a));
     }
-    return dentroDoTeto.slice(0, limit);
+
+    return {
+      produtos: produtos.slice(0, limit),
+      hasNextPage: Boolean(data.productOfferV2?.pageInfo?.hasNextPage),
+    };
+  },
+
+  async search(params) {
+    const { produtos } = await this.searchPage!(params);
+    return produtos;
   },
 
   /**

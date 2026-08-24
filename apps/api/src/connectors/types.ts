@@ -14,6 +14,16 @@ export interface NormalizedProduct {
   listPrice?: number;
   /** Percentual de comissao do programa, quando a API informa. */
   commissionPct?: number;
+  /**
+   * Parte da comissao que o vendedor poe por cima da base da loja. Na Shopee a
+   * base ficou fixa em 3% em toda medicao, entao e este campo que separa
+   * oferta boa de oferta comum -- e o que a tela chama de "comissao extra".
+   */
+  sellerCommissionPct?: number;
+  /** Comissao em reais, quando a API informa o valor absoluto. */
+  commissionBrl?: number;
+  /** Classificacao da loja na plataforma (Shopee: 1, 2, ...). */
+  shopType?: number;
   rating?: number;
   reviewCount?: number;
   /** Unidades vendidas. E o filtro que separa "vende" de "esta no catalogo". */
@@ -40,6 +50,12 @@ export interface SearchParams {
   /** Padrao: mais vendidos. E o que separa oferta de vitrine parada. */
   sort?: SearchSort;
   limit?: number;
+  /** Pagina, base 1. A Shopee limita 50 itens por pagina. */
+  page?: number;
+  /** Piso de `sellerCommissionPct`, em percentual (20 = 20%). */
+  minCommissionPct?: number;
+  /** So vendedores que a loja marca como destaque. */
+  keySeller?: boolean;
 }
 
 /**
@@ -66,6 +82,11 @@ export interface Connector {
   getProduct(id: string): Promise<NormalizedProduct | null>;
   search(params: SearchParams): Promise<NormalizedProduct[]>;
   /**
+   * Busca sabendo se ha proxima pagina. Opcional: so a Shopee expoe pageInfo,
+   * e sem isso a tela nao consegue desabilitar o botao de avancar.
+   */
+  searchPage?(params: SearchParams): Promise<{ produtos: NormalizedProduct[]; hasNextPage: boolean }>;
+  /**
    * Transforma a URL limpa em link de afiliado rastreado.
    * `subId` e o carimbo que volta no relatorio de vendas da loja e liga a
    * venda a oferta que a gerou -- usamos o codigo do ShortLink.
@@ -88,6 +109,6 @@ export interface Connector {
 
 export class MissingCredentialsError extends Error {
   constructor(platform: Platform) {
-    super(`Sem credencial ativa para ${platform}. Cadastre em Conexoes.`);
+    super(`Sem credencial ativa para ${platform}. Cadastre em Configuracoes > Plataformas.`);
   }
 }
