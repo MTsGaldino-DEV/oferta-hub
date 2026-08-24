@@ -60,6 +60,23 @@ const desc = mesclar(
 );
 assert.deepEqual(desc.map((x) => x.externalId), ['muito', 'pouco']);
 
+// Relevancia nao tem nota comparavel entre categorias -- a ordem de chegada
+// tem que sobreviver, mesmo atravessando a fronteira entre duas listas e
+// mesmo quando vendas/preco/desconto teriam reordenado pro lado contrario.
+const relevancia = mesclar(
+  [
+    [p('primeiro', { soldCount: 1, price: 100, listPrice: 100 })],
+    [p('segundo', { soldCount: 999, price: 1, listPrice: 1000 })],
+  ],
+  'relevancia',
+  10,
+);
+assert.deepEqual(
+  relevancia.map((x) => x.externalId),
+  ['primeiro', 'segundo'],
+  'relevancia devia manter ordem de chegada, mesmo com segundo vendendo mais, custando menos e com desconto maior',
+);
+
 // O corte vem DEPOIS de ordenar: com limit 1 sobra o melhor do conjunto todo,
 // nao o primeiro da primeira lista.
 const cortado = mesclar(

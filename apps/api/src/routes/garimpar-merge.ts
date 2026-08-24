@@ -25,7 +25,7 @@ const NOTA: Record<SearchSort, (p: NormalizedProduct) => number> = {
  *
  * O dedupe importa porque a Shopee cobra uma query por categoria e a mesma
  * oferta costuma aparecer em mais de uma. O corte vem depois da ordenacao: com
- * N categorias chegam até N x limit itens, e cortar antes devolveria os piores
+ * N categorias chegam ate N x limit itens, e cortar antes devolveria os piores
  * de cada lista em vez dos melhores do conjunto.
  */
 export function mesclar(

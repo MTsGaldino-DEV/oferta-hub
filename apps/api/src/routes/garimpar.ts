@@ -8,7 +8,7 @@ import { mesclar } from './garimpar-merge.js';
 
 /**
  * `categoryIds` chega repetido na query string (`?categoryIds=1&categoryIds=2`).
- * Com um valor só o Fastify entrega string, com vários entrega array -- por
+ * Com um valor so o Fastify entrega string, com varios entrega array -- por
  * isso o preprocess normaliza para lista antes de validar.
  */
 const listaDeIds = z.preprocess(
