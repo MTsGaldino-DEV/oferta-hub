@@ -8,30 +8,36 @@ interface GroupRow {
   joined: number;
   left: number;
   trackingSince: string | null;
+  sent: number;
 }
 
 interface GroupsResponse {
   days: number;
   groups: GroupRow[];
+  totais: { grupos: number; membros: number; enviadas: number };
 }
 
 export function MeusGrupos() {
   const [days, setDays] = useState(30);
-  const [groups, setGroups] = useState<GroupRow[] | null>(null);
+  const [dados, setDados] = useState<GroupsResponse | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
+    setErro(null);
     void api
       .get<GroupsResponse>(`/api/groups?days=${days}`)
-      .then((r) => setGroups(r.groups))
-      .catch(() => setGroups([]));
+      .then(setDados)
+      .catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar os grupos.'));
   }, [days]);
+
+  const grupos = dados?.groups ?? [];
 
   return (
     <>
       <div className="head">
         <div>
           <h1>Meus Grupos</h1>
-          <p>Quantos membros cada grupo tem agora, e quantos entraram ou saíram no período escolhido.</p>
+          <p>Acompanhe a saúde dos seus grupos e o alcance de cada envio.</p>
         </div>
         <div className="field" style={{ width: 180 }}>
           <label htmlFor="days">Período</label>
@@ -43,56 +49,76 @@ export function MeusGrupos() {
         </div>
       </div>
 
-      <div className="panel">
-        <h2 className="panel__title">Grupos</h2>
-        {groups === null ? null : groups.length === 0 ? (
-          <div className="empty">
-            <strong>Nenhum grupo sincronizado</strong>
-            Conecte o WhatsApp e sincronize os grupos em Configurações para ver as métricas aqui.
+      {erro && <div className="notice">{erro}</div>}
+
+      {dados && (
+        <div className="grid-kpi">
+          <div className="kpi">
+            <div className="kpi__label">Grupos ativos</div>
+            <div className="kpi__value">{int(dados.totais.grupos)}</div>
           </div>
-        ) : (
-          <>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Grupo</th>
-                  <th className="num">Membros</th>
-                  <th className="num">Entraram</th>
-                  <th className="num">Saíram</th>
-                  <th>Rastreando desde</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groups.map((g) => (
-                  <tr key={g.jid}>
-                    <td>
-                      <strong>{g.name}</strong>
-                    </td>
-                    <td className="num">{g.memberCount ?? '—'}</td>
-                    <td className="num" style={g.joined ? { color: 'var(--gain)' } : undefined}>
-                      {g.joined ? `+${int(g.joined)}` : 0}
-                    </td>
-                    <td className="num" style={g.left ? { color: 'var(--drop)' } : undefined}>
-                      {g.left ? `-${int(g.left)}` : 0}
-                    </td>
-                    <td>
-                      {g.trackingSince ? (
-                        `desde ${new Date(g.trackingSince).toLocaleDateString('pt-BR')}`
-                      ) : (
-                        <span style={{ color: 'var(--muted)' }}>ainda sem histórico</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 10 }}>
-              Entradas e saídas só contam a partir de quando essa métrica passou a ser registrada (veja
-              "Rastreando desde" de cada grupo) — período anterior a isso não é zero, é desconhecido.
-            </p>
-          </>
-        )}
+          <div className="kpi">
+            <div className="kpi__label">Membros alcançados</div>
+            <div className="kpi__value">{int(dados.totais.membros)}</div>
+          </div>
+          <div className="kpi">
+            <div className="kpi__label">Mensagens enviadas</div>
+            <div className="kpi__value">{int(dados.totais.enviadas)}</div>
+          </div>
+        </div>
+      )}
+
+      {dados && grupos.length === 0 && (
+        <div className="empty">
+          <strong>Nenhum grupo sincronizado</strong>
+          Conecte o WhatsApp e sincronize os grupos em Configurações › Canais para ver as métricas aqui.
+        </div>
+      )}
+
+      <div className="grupos">
+        {grupos.map((g) => (
+          <div key={g.jid} className="grupo">
+            <h2 className="grupo__nome">{g.name}</h2>
+
+            <div className="grupo__linha">
+              <div>
+                <strong className="grupo__membros">{g.memberCount ?? '—'}</strong>
+                <span className="grupo__unidade">membros</span>
+              </div>
+              <div className="grupo__delta">
+                <span style={{ color: g.joined ? 'var(--gain)' : 'var(--muted)' }}>
+                  ↑ {int(g.joined)} em {days}d
+                </span>
+                <span style={{ color: g.left ? 'var(--drop)' : 'var(--muted)' }}>
+                  ↓ {int(g.left)} em {days}d
+                </span>
+              </div>
+            </div>
+
+            <div className="grupo__rodape">
+              {g.sent > 0 ? (
+                <span>
+                  Enviadas: <strong>{int(g.sent)}</strong>
+                </span>
+              ) : (
+                <span style={{ color: 'var(--muted)' }}>Sem envios ainda</span>
+              )}
+              {!g.trackingSince && (
+                <span style={{ color: 'var(--muted)' }} title="Entradas e saídas só contam a partir do primeiro registro">
+                  sem histórico de entradas
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
+
+      {grupos.length > 0 && (
+        <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 12 }}>
+          Entradas e saídas só contam a partir de quando a métrica passou a ser registrada em cada grupo —
+          período anterior a isso não é zero, é desconhecido.
+        </p>
+      )}
     </>
   );
 }
