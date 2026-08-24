@@ -793,6 +793,29 @@ textarea {
   text-align: right;
 }
 
+/* Cabecalho que ordena: parece cabecalho, age como botao. A coluna ativa
+   fica em destaque pra nao restar duvida sobre o que manda na ordem. */
+.th-ordenavel {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.th-ordenavel:hover {
+  color: var(--brand);
+}
+
+.th-ordenavel[data-ativa='true'] {
+  color: var(--brand);
+  font-weight: 700;
+}
+
 .cell-product {
   display: flex;
   align-items: center;
@@ -936,6 +959,32 @@ button.chip {
 .chart {
   width: 100%;
   height: 200px;
+  display: block;
+}
+
+/* Ancora pro tooltip posicionado em cima do svg. */
+.chart-wrap {
+  position: relative;
+}
+
+/* --raise + branco: mesmo par de cores do botao primario, pra destacar
+   sobre o painel (que ja usa --surface de fundo). */
+.chart-tooltip {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  background: var(--raise);
+  color: #fff;
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow);
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart-tooltip strong {
   display: block;
 }
 
