@@ -1,7 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { getTheme, setTheme } from '../theme.js';
-import { useProtocolToast } from '../components/ProtocolToast.js';
 
 interface PlatformInfo {
   platform: string;
@@ -11,14 +9,6 @@ interface PlatformInfo {
   lastError: string | null;
   preview: Record<string, string>;
   fields: { name: string; label: string; secret: boolean; help?: string }[];
-}
-
-interface WaStatus {
-  status: 'disconnected' | 'connecting' | 'qr' | 'connected';
-  qr: string | null;
-  me: string | null;
-  quota: { used: number; cap: number };
-  groups: { jid: string; name: string; isDefault: boolean }[];
 }
 
 function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => void }) {
@@ -59,13 +49,13 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
     <div className="panel">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 16 }}>{info.label}</strong>
-        <span className="chip" data-tone={info.connected ? (info.lastError ? 'off' : 'on') : undefined}>
-          {info.connected ? (info.lastError ? 'com erro' : 'conectada') : 'não configurada'}
+        <span className="chip" data-tone={info.connected ? 'on' : undefined}>
+          {info.connected ? 'Conectado' : 'Pendente'}
         </span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           {info.connected && (
             <button className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void test()}>
-              Testar
+              Validar conexão
             </button>
           )}
           <button className="btn btn--ghost btn--sm" onClick={() => setOpen((v) => !v)}>
@@ -96,7 +86,7 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
           </div>
           <div className="row" style={{ marginTop: 14 }}>
             <button className="btn" disabled={busy || Object.keys(values).length === 0} onClick={() => void save()}>
-              Salvar e testar
+              Salvar
             </button>
             <small style={{ color: 'var(--muted)' }}>
               Campo em branco mantém o valor já salvo. Tudo é gravado criptografado.
@@ -110,157 +100,21 @@ function PlatformCard({ info, onSaved }: { info: PlatformInfo; onSaved: () => vo
 
 export function Conexoes() {
   const [platforms, setPlatforms] = useState<PlatformInfo[]>([]);
-  const [wa, setWa] = useState<WaStatus | null>(null);
-  const protocolo = useProtocolToast();
-  // Guarda o status anterior pra disparar so na transicao, nao a cada
-  // resposta do polling (que chega de 4 em 4 segundos).
-  const statusAnterior = useRef<WaStatus['status'] | null>(null);
-  // Guarda o que foi ANUNCIADO, nao o status anterior: um blip
-  // connected -> connecting -> connected nao pode anunciar nada, e uma
-  // queda que passe por 'connecting' antes de morrer ainda precisa
-  // anunciar quando chegar em 'disconnected'.
-  const anunciadoConectado = useRef(false);
 
   const loadPlatforms = () => api.get<PlatformInfo[]>('/api/platforms').then(setPlatforms).catch(() => {});
-  const loadWa = () => api.get<WaStatus>('/api/whatsapp/status').then(setWa).catch(() => {});
 
   useEffect(() => {
     void loadPlatforms();
-    void loadWa();
-    // Enquanto o QR está na tela, ele expira em segundos e precisa ser renovado.
-    const timer = setInterval(() => void loadWa(), 4000);
-    return () => clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    if (!wa) return;
-    const antes = statusAnterior.current;
-    statusAnterior.current = wa.status;
-
-    // Primeira leitura da pagina nao e transicao: so registra o estado
-    // inicial, senao abrir a tela com o WhatsApp ja conectado dispararia
-    // o feedback do nada.
-    if (antes === null) {
-      anunciadoConectado.current = wa.status === 'connected';
-      return;
-    }
-    if (antes === wa.status) return;
-
-    if (wa.status === 'connected') {
-      // Ja anunciado: isso e a volta de um blip, nao uma conexao nova.
-      if (anunciadoConectado.current) return;
-      anunciadoConectado.current = true;
-      protocolo({
-        title: 'WHATSAPP',
-        subtitle: 'Conectado',
-        accent: 'var(--gain)',
-        icon: 'whatsapp',
-        sound: 'whatsapp-on',
-      });
-    } else if (anunciadoConectado.current && wa.status !== 'connecting') {
-      // 'connecting' e blip -- o Baileys reconecta sozinho em segundos.
-      // So 'disconnected' e 'qr' sao queda de verdade.
-      anunciadoConectado.current = false;
-      protocolo({
-        title: 'WHATSAPP',
-        subtitle: 'Desconectado',
-        accent: 'var(--drop)',
-        icon: 'whatsapp',
-        sound: 'whatsapp-off',
-      });
-    }
-  }, [wa?.status]);
 
   return (
     <>
       <div className="head">
         <div>
-          <h1>Conexões</h1>
-          <p>Credenciais ficam criptografadas no banco com a MASTER_KEY. Perdeu a chave, perdeu as credenciais.</p>
+          <h1>Plataformas</h1>
+          <p>Suas contas de afiliado, pra gerar links com a sua tag.</p>
         </div>
       </div>
-
-      <div className="notice">
-        O envio usa uma biblioteca não oficial do WhatsApp. Pareie um <strong>chip secundário</strong>: o número
-        pode ser banido, e o banimento costuma ser definitivo.
-      </div>
-
-      <div className="panel">
-        <h2 className="panel__title">WhatsApp</h2>
-
-        {wa?.status === 'connected' ? (
-          <>
-            <p style={{ marginTop: 0 }}>
-              Conectado como <strong>{wa.me?.split(':')[0]}</strong>. Enviadas hoje: {wa.quota.used} de{' '}
-              {wa.quota.cap}.
-            </p>
-
-            <div className="field" style={{ maxWidth: 380 }}>
-              <label htmlFor="group">Grupo que recebe as ofertas</label>
-              <select
-                id="group"
-                value={wa.groups.find((g) => g.isDefault)?.jid ?? ''}
-                onChange={async (e) => {
-                  await api.post('/api/whatsapp/default-group', { jid: e.target.value });
-                  void loadWa();
-                }}
-              >
-                <option value="">Escolha um grupo</option>
-                {wa.groups.map((g) => (
-                  <option key={g.jid} value={g.jid}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="row" style={{ marginTop: 14 }}>
-              <button className="btn btn--ghost" onClick={async () => { await api.post('/api/whatsapp/sync-groups'); void loadWa(); }}>
-                Atualizar grupos
-              </button>
-              <button className="btn btn--ghost" onClick={async () => { await api.post('/api/whatsapp/logout'); void loadWa(); }}>
-                Desconectar
-              </button>
-            </div>
-          </>
-        ) : wa?.qr ? (
-          <div style={{ display: 'flex', gap: 22, alignItems: 'center', flexWrap: 'wrap' }}>
-            <img src={wa.qr} alt="QR code para parear o WhatsApp" width={200} height={200} style={{ borderRadius: 'var(--r)' }} />
-            <ol style={{ margin: 0, paddingLeft: 18, fontSize: 14, lineHeight: 1.8 }}>
-              <li>Abra o WhatsApp no chip secundário</li>
-              <li>Aparelhos conectados → Conectar aparelho</li>
-              <li>Aponte para este código</li>
-            </ol>
-          </div>
-        ) : (
-          <>
-            <p style={{ marginTop: 0, color: 'var(--muted)', fontSize: 14 }}>
-              Desconectado. Clique em parear e o QR aparece aqui.
-            </p>
-            <div className="row">
-              <button className="btn" onClick={async () => { await api.post('/api/whatsapp/connect'); void loadWa(); }}>
-                {wa?.status === 'connecting' ? 'Conectando...' : 'Parear número'}
-              </button>
-              {/* Saida de emergencia: sessao morta em disco faz o Baileys tentar
-                  logar com credencial invalida e voltar pra "desconectado" sem
-                  nunca gerar QR. Aqui o operador apaga e recomeca. */}
-              <button
-                className="btn btn--ghost"
-                onClick={async () => {
-                  if (!confirm('Isso apaga a sessão salva. Você vai precisar ler o QR de novo. Continuar?')) return;
-                  await api.post('/api/whatsapp/logout');
-                  await api.post('/api/whatsapp/connect');
-                  void loadWa();
-                }}
-              >
-                Apagar sessão e parear do zero
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <AparenciaCard />
-
-      <ExtensaoCard />
 
       {[...platforms]
         .sort((a, b) => Number(b.connected) - Number(a.connected))
@@ -268,98 +122,5 @@ export function Conexoes() {
           <PlatformCard key={p.platform} info={p} onSaved={loadPlatforms} />
         ))}
     </>
-  );
-}
-
-function AparenciaCard() {
-  const [theme, setThemeState] = useState(getTheme());
-  const protocolo = useProtocolToast();
-
-  return (
-    <div className="panel">
-      <h2 className="panel__title">Aparência</h2>
-      <div className="row">
-        <button
-          className="btn btn--ghost"
-          onClick={() => {
-            const next = theme === 'dark' ? 'light' : 'dark';
-            setTheme(next);
-            setThemeState(next);
-            protocolo({
-              title: next === 'dark' ? 'MODO ESCURO' : 'MODO CLARO',
-              subtitle: 'Aplicado',
-              accent: 'var(--brand)',
-              icon: 'tema',
-              sound: 'tema',
-            });
-          }}
-        >
-          {theme === 'dark' ? 'Modo claro' : 'Modo escuro'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * A extensao do navegador e o unico caminho pro Mercado Livre: eles nao tem
- * API de afiliados e bloqueiam leitura de fora. Ela autentica por este token,
- * nao pela sessao do painel -- fala de outra origem e nao carrega o cookie.
- */
-function ExtensaoCard() {
-  const [token, setToken] = useState<string | null>(null);
-  const [aberto, setAberto] = useState(false);
-  const [copiado, setCopiado] = useState(false);
-
-  useEffect(() => {
-    api.get<{ token: string }>('/api/extensao/token').then((r) => setToken(r.token)).catch(() => {});
-  }, []);
-
-  async function copiar() {
-    if (!token) return;
-    await navigator.clipboard.writeText(token);
-    setCopiado(true);
-    setTimeout(() => setCopiado(false), 2000);
-  }
-
-  return (
-    <div className="panel">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <strong style={{ fontSize: 16 }}>Extensão do navegador</strong>
-        <span className="chip" data-tone={token ? 'on' : undefined}>Mercado Livre</span>
-        <span style={{ marginLeft: 'auto' }}>
-          <button className="btn btn--ghost btn--sm" onClick={() => setAberto((v) => !v)}>
-            {aberto ? 'Fechar' : 'Como instalar'}
-          </button>
-        </span>
-      </div>
-
-      <p style={{ marginTop: 0, fontSize: 14, color: 'var(--muted)' }}>
-        O Mercado Livre não tem API de afiliados e bloqueia leitura de fora. A extensão captura o produto
-        pela sua sessão e gera o link <strong>meli.la</strong> de verdade — sem ele a comissão pode não
-        ser atribuída a você.
-      </p>
-
-      <div className="field" style={{ maxWidth: 460 }}>
-        <label htmlFor="exttoken">Token da extensão</label>
-        <div className="row">
-          <input id="exttoken" readOnly value={token ?? 'carregando...'} style={{ fontFamily: 'var(--mono)', fontSize: 12 }} />
-          <button className="btn btn--ghost" disabled={!token} onClick={() => void copiar()}>
-            {copiado ? 'Copiado' : 'Copiar'}
-          </button>
-        </div>
-        <small>Cole no popup da extensão, junto do endereço deste app.</small>
-      </div>
-
-      {aberto && (
-        <ol style={{ fontSize: 14, lineHeight: 1.9, marginTop: 16, paddingLeft: 20 }}>
-          <li>Abra <code>chrome://extensions</code> e ligue o <strong>Modo do desenvolvedor</strong></li>
-          <li>Clique em <strong>Carregar sem compactação</strong> e escolha a pasta <code>extensao/</code> do projeto</li>
-          <li>Abra o popup da extensão, cole o token acima e o endereço <code>http://localhost:3333</code></li>
-          <li>Entre no <strong>Mercado Livre Afiliados</strong> neste mesmo navegador — é a sessão dele que gera o link</li>
-          <li>Abra um produto ou uma busca do ML: o botão <strong>Mandar pro Hub</strong> aparece no canto</li>
-        </ol>
-      )}
-    </div>
   );
 }
