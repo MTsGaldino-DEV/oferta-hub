@@ -8,10 +8,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const POR_PAGINA = 25;
 
 const queryOffers = z.object({
-  days: z.coerce.number().int().min(1).max(180).default(30),
+  days: z.coerce
+    .number()
+    .int()
+    .min(1, 'O período deve ser de 1 a 180 dias.')
+    .max(180, 'O período deve ser de 1 a 180 dias.')
+    .default(30),
   page: z.coerce.number().int().min(1, 'A página começa em 1.').default(1),
-  sort: z.enum(['pendente', 'sentAt', 'clicks', 'orders', 'revenue', 'price', 'score']).default('pendente'),
-  dir: z.enum(['asc', 'desc']).default('desc'),
+  sort: z
+    .enum(['pendente', 'sentAt', 'clicks', 'orders', 'revenue', 'price', 'score'], {
+      message: 'Coluna de ordenação inválida.',
+    })
+    .default('pendente'),
+  dir: z.enum(['asc', 'desc'], { message: 'Direção de ordenação inválida.' }).default('desc'),
 });
 
 export async function statsRoutes(app: FastifyInstance) {

@@ -51,17 +51,7 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
     <article
       className="card"
       data-leaving={leaving}
-      role="button"
-      tabIndex={0}
-      title="Clique para ver e editar o texto da mensagem"
-      aria-label={`Ver e editar o texto de ${offer.product.title}`}
       onClick={() => onEdit(offer)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onEdit(offer);
-        }
-      }}
     >
       <div className="card__well">
         {offer.product.imageUrl ? (
@@ -84,7 +74,19 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
         </span>
         {(offer.product.soldCount ?? 0) >= CAMPEAO && <span className="card__selo">Mais vendido</span>}
 
-        <h3 className="card__titulo">{offer.product.title}</h3>
+        <h3 className="card__titulo">
+          <button
+            type="button"
+            className="card__titulo-btn"
+            title="Ver e editar o texto da mensagem"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(offer);
+            }}
+          >
+            {offer.product.title}
+          </button>
+        </h3>
 
         <div className="card__meta">
           {offer.product.rating ? (

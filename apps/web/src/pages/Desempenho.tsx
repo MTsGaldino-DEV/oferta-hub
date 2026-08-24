@@ -139,6 +139,30 @@ function Chart({ data }: { data: Point[] }) {
   );
 }
 
+function Cabecalho({
+  coluna,
+  children,
+  sort,
+  dir,
+  ordenarPor,
+}: {
+  coluna: Coluna;
+  children: React.ReactNode;
+  sort: Coluna;
+  dir: 'asc' | 'desc';
+  ordenarPor: (coluna: Coluna) => void;
+}) {
+  const ativa = sort === coluna;
+  return (
+    <th className="num" aria-sort={ativa ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="th-ordenavel" data-ativa={ativa} onClick={() => ordenarPor(coluna)}>
+        {children}
+        <span aria-hidden="true">{ativa ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}</span>
+      </button>
+    </th>
+  );
+}
+
 export function Desempenho() {
   const [days, setDays] = useState(30);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -160,10 +184,18 @@ export function Desempenho() {
   // Efeito proprio: pagina/sort/dir nao devem refazer overview, series e
   // platforms, que so dependem do periodo.
   useEffect(() => {
+    let atual = true;
     void api
       .get<RespostaOfertas>(`/api/stats/offers?days=${days}&page=${pagina}&sort=${sort}&dir=${dir}`)
-      .then(setOfertas)
+      .then((r) => {
+        // Resposta de uma busca que ja foi substituida por outra: descarta.
+        // Sem isso, a resposta lenta de um clique antigo sobrescreve a nova.
+        if (atual) setOfertas(r);
+      })
       .catch(() => {});
+    return () => {
+      atual = false;
+    };
   }, [days, pagina, sort, dir]);
 
   function trocarPeriodo(novo: number) {
@@ -181,23 +213,25 @@ export function Desempenho() {
     setPagina(1);
   }
 
-  function Cabecalho({ coluna, children }: { coluna: Coluna; children: React.ReactNode }) {
-    const ativa = sort === coluna;
-    return (
-      <th className="num">
-        <button
-          type="button"
-          className="th-ordenavel"
-          data-ativa={ativa}
-          aria-sort={ativa ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-          onClick={() => ordenarPor(coluna)}
-        >
-          {children}
-          <span aria-hidden="true">{ativa ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}</span>
-        </button>
-      </th>
-    );
-  }
+  const paginacaoOfertas = ofertas && (
+    <div className="row" style={{ marginTop: 12, alignItems: 'center' }}>
+      <button
+        className="btn btn--ghost btn--sm"
+        disabled={ofertas.pageInfo.page <= 1}
+        onClick={() => setPagina(ofertas.pageInfo.page - 1)}
+      >
+        Anterior
+      </button>
+      <span style={{ color: 'var(--muted)', fontSize: 13 }}>Página {ofertas.pageInfo.page}</span>
+      <button
+        className="btn btn--ghost btn--sm"
+        disabled={!ofertas.pageInfo.hasNextPage}
+        onClick={() => setPagina(ofertas.pageInfo.page + 1)}
+      >
+        Próxima
+      </button>
+    </div>
+  );
 
   return (
     <>
@@ -272,10 +306,15 @@ export function Desempenho() {
       <div className="panel">
         <h2 className="panel__title">Ofertas enviadas</h2>
         {!ofertas || ofertas.linhas.length === 0 ? (
-          <div className="empty">
-            <strong>Nada enviado ainda</strong>
-            Aprove uma oferta na fila e ela aparece aqui com os cliques.
-          </div>
+          <>
+            <div className="empty">
+              <strong>Nada enviado ainda</strong>
+              Aprove uma oferta na fila e ela aparece aqui com os cliques.
+            </div>
+            {/* Pagina vazia nao significa fim: se o usuario esta numa pagina
+                alta e ela vier vazia, sem isso ele fica sem "Anterior" pra voltar. */}
+            {ofertas && (ofertas.pageInfo.page > 1 || ofertas.pageInfo.hasNextPage) && paginacaoOfertas}
+          </>
         ) : (
           <>
             <p style={{ color: 'var(--muted)', fontSize: 13 }}>{int(ofertas.total)} ofertas no período</p>
@@ -283,11 +322,11 @@ export function Desempenho() {
               <thead>
                 <tr>
                   <th>Produto</th>
-                  <Cabecalho coluna="price">Preço</Cabecalho>
-                  <Cabecalho coluna="clicks">Cliques</Cabecalho>
-                  <Cabecalho coluna="orders">Vendas</Cabecalho>
-                  <Cabecalho coluna="revenue">Comissão</Cabecalho>
-                  <Cabecalho coluna="sentAt">Enviada</Cabecalho>
+                  <Cabecalho coluna="price" sort={sort} dir={dir} ordenarPor={ordenarPor}>Preço</Cabecalho>
+                  <Cabecalho coluna="clicks" sort={sort} dir={dir} ordenarPor={ordenarPor}>Cliques</Cabecalho>
+                  <Cabecalho coluna="orders" sort={sort} dir={dir} ordenarPor={ordenarPor}>Vendas</Cabecalho>
+                  <Cabecalho coluna="revenue" sort={sort} dir={dir} ordenarPor={ordenarPor}>Comissão</Cabecalho>
+                  <Cabecalho coluna="sentAt" sort={sort} dir={dir} ordenarPor={ordenarPor}>Enviada</Cabecalho>
                 </tr>
               </thead>
               <tbody>
@@ -316,23 +355,7 @@ export function Desempenho() {
               </tbody>
             </table>
 
-            <div className="row" style={{ marginTop: 12, alignItems: 'center' }}>
-              <button
-                className="btn btn--ghost btn--sm"
-                disabled={ofertas.pageInfo.page <= 1}
-                onClick={() => setPagina(ofertas.pageInfo.page - 1)}
-              >
-                Anterior
-              </button>
-              <span style={{ color: 'var(--muted)', fontSize: 13 }}>Página {ofertas.pageInfo.page}</span>
-              <button
-                className="btn btn--ghost btn--sm"
-                disabled={!ofertas.pageInfo.hasNextPage}
-                onClick={() => setPagina(ofertas.pageInfo.page + 1)}
-              >
-                Próxima
-              </button>
-            </div>
+            {paginacaoOfertas}
           </>
         )}
       </div>
