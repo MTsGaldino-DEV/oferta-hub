@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, brl, int } from '../api.js';
+import { api, brl, int } from '../../api.js';
 
 interface Entry {
   categoryId: number;
@@ -59,7 +59,7 @@ const parseTermos = (texto: string): string[] =>
 
 const rascunhoVazio = { name: '', minSales: 100, excludeTerms: '', entries: [] as Entry[] };
 
-export function Nichos() {
+export function EditorNicho() {
   const [nichos, setNichos] = useState<Nicho[]>([]);
   const [arvore, setArvore] = useState<Raiz[]>([]);
   const [editando, setEditando] = useState<string | 'novo' | null>(null);
@@ -168,7 +168,7 @@ export function Nichos() {
     <>
       <div className="head">
         <div>
-          <h1>Nichos</h1>
+          <h1>Regras de nicho</h1>
           <p>
             Categoria sozinha não entrega nicho: a prateleira de fones é quase toda TWS genérico. Um nicho aqui
             é um conjunto de categorias mais o que você aceita dentro de cada uma.
