@@ -94,7 +94,12 @@ export function Fila() {
     setError(null);
     try {
       const offer = await api.post<Offer>('/api/offers', { url: url.trim(), note: note.trim() || undefined });
-      setOffers((prev) => [offer, ...prev]);
+      // a rota pode devolver oferta que ja esta na lista, entao substitui em vez de empilhar
+      setOffers((prev) =>
+        prev.some((o) => o.id === offer.id)
+          ? prev.map((o) => (o.id === offer.id ? offer : o))
+          : [offer, ...prev],
+      );
       setUrl('');
       setNote('');
     } catch (err) {
@@ -121,7 +126,12 @@ export function Fila() {
       platform: item.platform,
       externalId: item.externalId,
     });
-    setOffers((prev) => [offer, ...prev]);
+    // a rota pode devolver oferta que ja esta na lista, entao substitui em vez de empilhar
+    setOffers((prev) =>
+      prev.some((o) => o.id === offer.id)
+        ? prev.map((o) => (o.id === offer.id ? offer : o))
+        : [offer, ...prev],
+    );
   }
 
   /** Tira a oferta da lista e corrige o contador da aba sem recarregar tudo. */
