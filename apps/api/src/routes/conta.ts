@@ -10,8 +10,9 @@ const corpo = z.object({
 
 export async function contaRoutes(app: FastifyInstance) {
   /**
-   * Troca a senha do painel. Derruba a sessao no fim: quem trocou a senha
-   * espera que a antiga pare de valer em todo lugar, inclusive nesta aba.
+   * Troca a senha do painel. O clearCookie encerra so a sessao desta aba:
+   * o token e assinado com sessionSecret, nao com a senha, entao sessoes ja
+   * emitidas em outros navegadores seguem valendo ate expirar.
    */
   app.post('/api/senha', async (req, reply) => {
     const { atual, nova } = corpo.parse(req.body);
