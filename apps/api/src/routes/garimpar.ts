@@ -21,7 +21,11 @@ const query = z
     keyword: z.string().trim().min(2, 'Digite pelo menos 2 caracteres.').optional(),
     categoryIds: listaDeIds,
     sort: z.enum(['relevancia', 'vendas', 'comissao', 'menor-preco', 'desconto']).default('vendas'),
-    minCommissionPct: z.coerce.number().min(0).max(100).optional(),
+    minCommissionPct: z.coerce
+      .number()
+      .min(0, 'A comissão mínima não pode ser negativa.')
+      .max(100, 'A comissão mínima não pode passar de 100%.')
+      .optional(),
     maxPrice: z.coerce.number().positive('O preço deve ser maior que zero.').optional(),
     // Nao usar z.coerce.boolean aqui: ele transforma a string "false" em true,
     // porque toda string nao vazia e truthy. So a string "true" liga o filtro.
@@ -29,8 +33,13 @@ const query = z
       .enum(['true', 'false'])
       .optional()
       .transform((v) => v === 'true'),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(60).default(40),
+    page: z.coerce.number().int().min(1, 'A página começa em 1.').default(1),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1, 'Peça pelo menos 1 resultado.')
+      .max(60, 'O limite é de 60 resultados por página.')
+      .default(40),
   })
   .refine((q) => q.keyword || q.categoryIds.length > 0, {
     message: 'Escolha uma categoria ou digite uma palavra-chave.',
