@@ -1,14 +1,10 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   BarChart3,
-  CalendarClock,
-  Eye,
   LayoutDashboard,
   ListChecks,
   Search,
-  Send,
   Settings,
-  Tags,
   Users,
   Workflow,
   type LucideIcon,
@@ -34,24 +30,15 @@ import {
 type NavItem = { to: string; label: string; end?: boolean; icon: LucideIcon };
 
 const GROUPS: { label: string | null; items: NavItem[] }[] = [
-  { label: null, items: [{ to: '/', label: 'Visão geral', end: true, icon: LayoutDashboard }] },
-  { label: null, items: [{ to: '/fila', label: 'Fila', icon: ListChecks }] },
   {
-    label: 'Catálogo',
+    label: 'Início',
     items: [
-      { to: '/garimpar', label: 'Garimpar', icon: Search },
-      { to: '/nichos', label: 'Nichos', icon: Tags },
-      { to: '/produtos', label: 'Preços vigiados', icon: Eye },
+      { to: '/', label: 'Visão geral', end: true, icon: LayoutDashboard },
+      { to: '/fila', label: 'Fila', icon: ListChecks },
     ],
   },
-  {
-    label: 'Automação',
-    items: [
-      { to: '/agenda', label: 'Agenda', icon: CalendarClock },
-      { to: '/automacoes', label: 'Automações', icon: Workflow },
-      { to: '/disparos', label: 'Disparos', icon: Send },
-    ],
-  },
+  { label: null, items: [{ to: '/garimpar', label: 'Garimpar', icon: Search }] },
+  { label: null, items: [{ to: '/automacoes', label: 'Automações', icon: Workflow }] },
   {
     label: 'Métricas',
     items: [
@@ -59,7 +46,7 @@ const GROUPS: { label: string | null; items: NavItem[] }[] = [
       { to: '/grupos', label: 'Meus Grupos', icon: Users },
     ],
   },
-  { label: 'Configurações', items: [{ to: '/configuracoes', label: 'Configurações', icon: Settings }] },
+  { label: null, items: [{ to: '/configuracoes', label: 'Configurações', icon: Settings }] },
 ];
 
 interface AppSidebarProps {

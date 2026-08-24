@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { api, brl, int, STORE } from '../api.js';
-import { Sparkline } from '../components/Sparkline.js';
+import { api, brl, int, STORE } from '../../api.js';
+import { Sparkline } from '../../components/Sparkline.js';
 
 interface Watch {
   id: string;
@@ -23,7 +23,7 @@ interface NichoCurado {
   id: string; name: string; minSales: number; entries: { categoryId: number }[];
 }
 
-export function Produtos() {
+export function Vigiar() {
   const [items, setItems] = useState<Watch[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [url, setUrl] = useState('');
@@ -149,7 +149,7 @@ export function Produtos() {
     <>
       <div className="head">
         <div>
-          <h1>Preços vigiados</h1>
+          <h1>Vigiar</h1>
           <p>
             O monitor lê o preço de hora em hora e guarda o histórico. Quando bate seu gatilho, a oferta vai
             direto pra fila — nunca direto pro grupo.
