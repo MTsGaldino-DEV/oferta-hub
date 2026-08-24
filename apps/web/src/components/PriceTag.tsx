@@ -159,7 +159,10 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
         {/* A justificativa da nota so aparece sob demanda: ela e util quando
             voce duvida do card, e ruido nos outros 90% das vezes. */}
         {porque && (
-          <ul className="card__razoes">
+          // Para o clique aqui -- sem isso, ler ou selecionar uma razao
+          // dispara o onEdit do card inteiro, ja que o clique borbulha ate o
+          // <article>.
+          <ul className="card__razoes" onClick={(e) => e.stopPropagation()}>
             {offer.scoreReasons.map((r, i) => (
               <li key={i} data-neg={r.points < 0}>
                 <span>{r.detail}</span>
