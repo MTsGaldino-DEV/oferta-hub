@@ -20,6 +20,7 @@ import { statsRoutes } from './routes/stats.js';
 import { templateRoutes } from './routes/templates.js';
 import { watchRoutes } from './routes/watch.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
+import { semearTemplates } from './services/templates-prontos.js';
 import { startWorkers, runCategorySync, runDiscovery, runPriceMonitor } from './workers/index.js';
 import { whatsapp } from './whatsapp/baileys.js';
 
@@ -98,6 +99,7 @@ await app.register(async (instance) => {
 
 async function main() {
   await prisma.$connect();
+  await semearTemplates();
   await app.listen({ port: env.port, host: '0.0.0.0' });
   logger.info(`API no ar em ${env.publicUrl} (porta ${env.port})`);
 
