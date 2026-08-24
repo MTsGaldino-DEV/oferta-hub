@@ -54,6 +54,29 @@ export function ResultadoBusca({ resultado, buscando, onPagina }: Props) {
     );
   }
 
+  // O filtro (comissao/preco) roda sobre o lote que a Shopee devolveu, entao
+  // pagina vazia nao significa fim dos resultados -- sem os controles aqui,
+  // pagina 1 vazia nao deixa ver a 2, e pagina 3 vazia prende o usuario sem volta.
+  const paginacao = (
+    <div className="row" style={{ marginTop: 12, alignItems: 'center' }}>
+      <button
+        className="btn btn--ghost btn--sm"
+        disabled={resultado.pageInfo.page <= 1}
+        onClick={() => onPagina(resultado.pageInfo.page - 1)}
+      >
+        Anterior
+      </button>
+      <span style={{ color: 'var(--muted)', fontSize: 13 }}>Página {resultado.pageInfo.page}</span>
+      <button
+        className="btn btn--ghost btn--sm"
+        disabled={!resultado.pageInfo.hasNextPage}
+        onClick={() => onPagina(resultado.pageInfo.page + 1)}
+      >
+        Próxima
+      </button>
+    </div>
+  );
+
   if (resultado.produtos.length === 0) {
     return (
       <>
@@ -68,6 +91,7 @@ export function ResultadoBusca({ resultado, buscando, onPagina }: Props) {
             ? `A Shopee devolveu ${int(resultado.antesDoFiltro)} itens, mas os filtros cortaram todos. Tente baixar a comissão mínima ou subir o teto de preço.`
             : 'A Shopee não devolveu nada pra essa combinação.'}
         </div>
+        {(resultado.pageInfo.page > 1 || resultado.pageInfo.hasNextPage) && paginacao}
       </>
     );
   }
@@ -155,23 +179,7 @@ export function ResultadoBusca({ resultado, buscando, onPagina }: Props) {
         </tbody>
       </table>
 
-      <div className="row" style={{ marginTop: 12, alignItems: 'center' }}>
-        <button
-          className="btn btn--ghost btn--sm"
-          disabled={resultado.pageInfo.page <= 1}
-          onClick={() => onPagina(resultado.pageInfo.page - 1)}
-        >
-          Anterior
-        </button>
-        <span style={{ color: 'var(--muted)', fontSize: 13 }}>Página {resultado.pageInfo.page}</span>
-        <button
-          className="btn btn--ghost btn--sm"
-          disabled={!resultado.pageInfo.hasNextPage}
-          onClick={() => onPagina(resultado.pageInfo.page + 1)}
-        >
-          Próxima
-        </button>
-      </div>
+      {paginacao}
     </>
   );
 }
