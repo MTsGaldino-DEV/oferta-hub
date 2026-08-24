@@ -448,7 +448,11 @@ textarea {
 }
 
 .acordeao:hover {
-  color: var(--brand);
+  /* --brand e amarelo -- como cor de texto sobre fundo claro fica quase
+     ilegivel. Marca vira sublinhado, texto continua no --ink de sempre. */
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
 }
 
 .acordeao__seta {
@@ -808,12 +812,18 @@ textarea {
 }
 
 .th-ordenavel:hover {
-  color: var(--brand);
+  /* --brand e amarelo -- como cor de texto sobre fundo claro fica quase
+     ilegivel. Marca vira sublinhado, texto continua no --ink de sempre. */
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
 }
 
 .th-ordenavel[data-ativa='true'] {
-  color: var(--brand);
+  color: var(--ink);
   font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
 }
 
 .cell-product {
