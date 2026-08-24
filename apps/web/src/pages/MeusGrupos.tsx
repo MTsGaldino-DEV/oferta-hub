@@ -103,7 +103,14 @@ export function MeusGrupos() {
               ) : (
                 <span style={{ color: 'var(--muted)' }}>Sem envios ainda</span>
               )}
-              {!g.trackingSince && (
+              {g.trackingSince ? (
+                // Sem isso um grupo com poucos dias de historico mostra "0
+                // em 90d" como se fosse fato sobre o periodo inteiro, quando
+                // na verdade a janela rastreada e menor que isso.
+                <span style={{ color: 'var(--muted)' }} title="Entradas e saídas só contam a partir dessa data">
+                  desde {new Date(g.trackingSince).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                </span>
+              ) : (
                 <span style={{ color: 'var(--muted)' }} title="Entradas e saídas só contam a partir do primeiro registro">
                   sem histórico de entradas
                 </span>
