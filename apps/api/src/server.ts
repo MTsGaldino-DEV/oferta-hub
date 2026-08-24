@@ -7,6 +7,7 @@ import { prisma } from './db.js';
 import { logger } from './lib/logger.js';
 import { authRoutes, requireAuth } from './plugins/auth.js';
 import { automacaoRoutes } from './routes/automacoes.js';
+import { contaRoutes } from './routes/conta.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { disparoRoutes } from './routes/disparos.js';
 import { extensaoRoutes, extensaoAdminRoutes } from './routes/extensao.js';
@@ -74,6 +75,7 @@ await app.register(extensaoRoutes);
 await app.register(async (instance) => {
   instance.addHook('onRequest', requireAuth);
   await instance.register(automacaoRoutes);
+  await instance.register(contaRoutes);
   await instance.register(credentialRoutes);
   await instance.register(disparoRoutes);
   await instance.register(extensaoAdminRoutes);

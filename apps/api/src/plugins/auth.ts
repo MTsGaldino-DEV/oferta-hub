@@ -1,8 +1,11 @@
 import crypto from 'node:crypto';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { env } from '../env.js';
+import { senhaConfere } from './senha.js';
 
-const COOKIE = 'oh_session';
+// Exportado: conta.ts precisa limpar o mesmo cookie ao trocar a senha, e uma
+// segunda constante la seria uma segunda fonte da verdade pro nome do cookie.
+export const COOKIE = 'oh_session';
 
 function signToken(): string {
   const issuedAt = Date.now();
@@ -32,9 +35,7 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
 export async function authRoutes(app: FastifyInstance) {
   app.post<{ Body: { password?: string } }>('/api/login', async (req, reply) => {
     const given = req.body?.password ?? '';
-    const ok =
-      given.length === env.dashboardPassword.length &&
-      crypto.timingSafeEqual(Buffer.from(given), Buffer.from(env.dashboardPassword));
+    const ok = await senhaConfere(given);
 
     if (!ok) {
       await new Promise((r) => setTimeout(r, 600)); // freia tentativa em forca bruta
