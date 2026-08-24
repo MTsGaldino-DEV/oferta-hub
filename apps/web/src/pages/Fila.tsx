@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, brl, STORE, type Offer } from '../api.js';
 import { PriceTag } from '../components/PriceTag.js';
 
@@ -43,6 +43,23 @@ export function Fila() {
 
   const [editing, setEditing] = useState<Offer | null>(null);
   const [draft, setDraft] = useState('');
+  const editorRef = useRef<HTMLDivElement | null>(null);
+
+  // O editor nasce depois da prateleira de cards, entao clicar num card com
+  // a fila cheia nao move a tela sozinho -- sem isso parece que o clique nao
+  // fez nada.
+  useEffect(() => {
+    if (editing) editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [editing]);
+
+  /** Abre o editor de outro card -- avisa antes se ia descartar rascunho nao salvo. */
+  function abrirEditor(o: Offer) {
+    if (editing && draft !== editing.message) {
+      if (!confirm('Você tem texto editado sem salvar. Descartar e abrir outro card?')) return;
+    }
+    setEditing(o);
+    setDraft(o.message);
+  }
 
   // Fechado por padrao: adicionar a mao e a excecao, ver a fila e a regra.
   const [abrindoForm, setAbrindoForm] = useState(false);
@@ -412,17 +429,14 @@ export function Fila() {
                 posicao={posicao}
                 onSend={send}
                 onSkip={skip}
-                onEdit={(o) => {
-                  setEditing(o);
-                  setDraft(o.message);
-                }}
+                onEdit={abrirEditor}
               />
             ))}
         </div>
       )}
 
       {editing && (
-        <div className="panel" style={{ marginTop: 20 }}>
+        <div className="panel" style={{ marginTop: 20 }} ref={editorRef}>
           <h2 className="panel__title">Texto que vai pro grupo</h2>
           <textarea rows={12} value={draft} onChange={(e) => setDraft(e.target.value)} />
           <div className="row" style={{ marginTop: 12 }}>
