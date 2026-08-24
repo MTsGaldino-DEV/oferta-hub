@@ -168,7 +168,7 @@ export function EditorNicho() {
     <>
       <div className="head">
         <div>
-          <h1>Regras de nicho</h1>
+          <h2>Regras de nicho</h2>
           <p>
             Categoria sozinha não entrega nicho: a prateleira de fones é quase toda TWS genérico. Um nicho aqui
             é um conjunto de categorias mais o que você aceita dentro de cada uma.

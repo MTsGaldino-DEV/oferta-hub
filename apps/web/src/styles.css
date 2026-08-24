@@ -262,7 +262,8 @@ a {
   margin-bottom: 24px;
 }
 
-.head h1 {
+.head h1,
+.head h2 {
   font-size: 30px;
   font-weight: 800;
   letter-spacing: -0.035em;
