@@ -101,6 +101,9 @@ function Chart({ data }: { data: Point[] }) {
   }
 
   const ponto = ativo !== null ? data[ativo] : null;
+  // Clampado pra caixa nao vazar do painel nas pontas do grafico -- o
+  // usuario olha justamente o primeiro/ultimo ponto com mais frequencia.
+  const leftPct = ponto ? Math.min(92, Math.max(8, (xDoPonto(ativo!) / w) * 100)) : 0;
 
   return (
     <>
@@ -124,8 +127,11 @@ function Chart({ data }: { data: Point[] }) {
           )}
         </svg>
         {ponto && (
-          <div className="chart-tooltip" style={{ left: `${(xDoPonto(ativo!) / w) * 100}%` }}>
-            <strong>{new Date(ponto.day).toLocaleDateString('pt-BR')}</strong>
+          <div className="chart-tooltip" style={{ left: `${leftPct}%` }}>
+            {/* ponto.day e "YYYY-MM-DD"; sem o T00:00:00 o Date interpreta
+                como UTC e o toLocaleDateString imprime o dia anterior em
+                fusos negativos (ex: Brasilia). */}
+            <strong>{new Date(`${ponto.day}T00:00:00`).toLocaleDateString('pt-BR')}</strong>
             <span>{int(ponto.clicks)} cliques · {brl(ponto.revenue)}</span>
           </div>
         )}
@@ -145,16 +151,18 @@ function Cabecalho({
   sort,
   dir,
   ordenarPor,
+  num = true,
 }: {
   coluna: Coluna;
   children: React.ReactNode;
   sort: Coluna;
   dir: 'asc' | 'desc';
   ordenarPor: (coluna: Coluna) => void;
+  num?: boolean;
 }) {
   const ativa = sort === coluna;
   return (
-    <th className="num" aria-sort={ativa ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+    <th className={num ? 'num' : undefined} aria-sort={ativa ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
       <button type="button" className="th-ordenavel" data-ativa={ativa} onClick={() => ordenarPor(coluna)}>
         {children}
         <span aria-hidden="true">{ativa ? (dir === 'asc' ? ' ↑' : ' ↓') : ''}</span>
@@ -321,7 +329,10 @@ export function Desempenho() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Produto</th>
+                  {/* Ordena por "pendente" -- unico caminho de volta pro
+                      estado padrao (pendentes primeiro) depois de clicar
+                      em outra coluna, sem precisar recarregar a pagina. */}
+                  <Cabecalho coluna="pendente" sort={sort} dir={dir} ordenarPor={ordenarPor} num={false}>Produto</Cabecalho>
                   <Cabecalho coluna="price" sort={sort} dir={dir} ordenarPor={ordenarPor}>Preço</Cabecalho>
                   <Cabecalho coluna="clicks" sort={sort} dir={dir} ordenarPor={ordenarPor}>Cliques</Cabecalho>
                   <Cabecalho coluna="orders" sort={sort} dir={dir} ordenarPor={ordenarPor}>Vendas</Cabecalho>
@@ -337,7 +348,7 @@ export function Desempenho() {
                         {o.imageUrl && <img src={o.imageUrl} alt="" loading="lazy" />}
                         <span>
                           {o.pendente && (
-                            <span className="chip" title="A loja ainda não confirmou a comissão desta venda">
+                            <span className="chip" style={{ marginRight: 6 }} title="A loja ainda não confirmou a comissão desta venda">
                               pendente
                             </span>
                           )}
