@@ -111,8 +111,12 @@ em `apps/web/src/pages/configuracoes/`:
    conexão". Os cards de Aparência (`Conexoes.tsx:274`) e Extensão
    (`Conexoes.tsx:309`) descem para a aba Conta, onde ajuste pessoal faz mais
    sentido que credencial de loja.
-3. **Mensagens** (`Templates.tsx`) — a página atual, mais uma faixa de cinco
-   presets clicáveis acima do editor.
+3. **Mensagens** (`Templates.tsx`) — a página atual, sem alteração. Os cinco
+   modelos prontos chegam pelo seed do backend e aparecem na lista como
+   qualquer outro, já clicáveis pelo botão "Editar". A lista ordena por
+   `isDefault desc, name asc`, então o modelo padrão fica no topo. Uma faixa
+   de presets separada acima do editor duplicaria essa lista, então não
+   existe.
 4. **Cupons** (`Cupons.tsx`) — novo, apenas um estado vazio explicando que a
    função chega depois.
 5. **Conta** (`Conta.tsx`) — novo. Nome, e-mail e plano como texto estático.
@@ -189,7 +193,11 @@ Verificação por etapa:
 - `/agenda`, `/nichos` e `/produtos` redirecionam para `/`.
 - Trocar a senha, ser deslogado, e entrar com a nova.
 - Após a troca, a senha antiga do `.env` deixa de funcionar.
-- Os cinco presets aparecem em Mensagens e carregam no editor ao clique.
+- Os cinco modelos aparecem em Mensagens, com "Direto e agressivo" no topo
+  como padrão, e carregam no editor pelo botão "Editar".
+- Nenhum dos cinco corpos põe `{PRECO_ANTIGO}` e `{PRECO}` na mesma linha: o
+  renderizador apaga a linha inteira quando um token conhecido fica sem
+  valor, e oferta sem preço de comparação sairia sem preço nenhum.
 - Na aba Vigiar, cadastrar um item vigiado e conferir que o `WatchItem` foi
   criado; cadastrar uma regra de garimpo e conferir o `DiscoveryRule`.
 - Na aba Canais, o WhatsApp conecta e desconecta como fazia em Conexões.
