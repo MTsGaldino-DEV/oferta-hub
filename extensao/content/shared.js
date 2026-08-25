@@ -186,5 +186,133 @@
     };
   }
 
-  window.__HUB = { texto, parsePrecoBR, lerDinheiro, lerVendidos, lerPrecos };
+  /**
+   * A URL da foto da Amazon carrega o TAMANHO e o FORMATO no proprio nome do
+   * arquivo. O card da listagem traz sempre a versao de vitrine -- pequena,
+   * recortada, as vezes AVIF com nome terminando em `.jpg` mesmo assim:
+   *
+   *   `._AC_SF226,226_QL85_`           226px       -> "a imagem esta pixelada"
+   *   `._AC_FMavif_SF217.5,435_QL54_`  recorte 1:2 -> "fica comprida"
+   *   `._AC_..._FMavif_...`            AVIF        -> WhatsApp nao renderiza
+   *
+   * Trocamos o trecho inteiro por `_SL1600_`: a foto do catalogo limitada a
+   * 1600px no lado MAIOR. `SL` so reduz -- nunca amplia -- e preserva aspecto.
+   * O prefixo `_AC_` NAO pode entrar junto: ele faz autocrop do espaco branco
+   * antes de escalar, e um 1000x1000 volta como 581x797.
+   *
+   * A extensao do arquivo e PRESERVADA, nao fixada em `.jpg`: forcar `.jpg`
+   * numa imagem `.png` devolve 404 -- trocar foto feia por foto quebrada e
+   * pior que o defeito original. A query tambem cai, senao a Amazon
+   * reintroduz o recorte.
+   */
+  const AMAZON_IMG = /^(https?:\/\/(?:m\.media-amazon\.com|images-na\.ssl-images-amazon\.com)\/images\/(?:I|S\/[^/?#]+)\/[^./?#]+)(?:\.[^/?#]*?)?(\.[a-z]{3,4})?(?:[?#].*)?$/i;
+
+  function normalizarImagem(href) {
+    const m = String(href || '').match(AMAZON_IMG);
+    return m ? `${m[1]}._SL1600_${m[2] || '.jpg'}` : href;
+  }
+
+  /**
+   * Resolve a URL de UM <img>, ignorando placeholder. Devolve tambem DE ONDE
+   * veio: a origem e o melhor sinal de qual imagem e a do produto.
+   *
+   * Tem que ser lista, e nao `a || b || c`: no lazy-load a loja deixa
+   * src="data:image/gif..." -- que e truthy! -- e a foto real em data-src,
+   * entao com o `||` o data-src nunca era alcancado.
+   */
+  function urlDoImg(img) {
+    if (img.getAttribute('width') === '1' && img.getAttribute('height') === '1') return null;
+    const ss = img.getAttribute('srcset');
+    const fontes = [
+      ['currentSrc', img.currentSrc],
+      ['data-src', img.getAttribute('data-src')],
+      ['src', img.getAttribute('src')],
+      ['srcset', ss ? ss.trim().split(',')[0].trim().split(/\s+/)[0] : null],
+    ];
+    for (const [origem, src] of fontes) {
+      if (!src || /^data:/i.test(src)) continue; // placeholder lazy-load
+      let href = src;
+      try { href = new URL(src, location.href).href; } catch { /* relativo esquisito */ }
+      return { href, origem };
+    }
+    return null;
+  }
+
+  /**
+   * Escolhe a MELHOR imagem do card, nao a primeira.
+   *
+   * Pegar a primeira e a causa de um estrago medido em producao pela
+   * concorrente: 135 ofertas de um mesmo usuario publicadas com a MESMA
+   * imagem -- um selo de frete que vinha antes da foto no DOM e ja estava
+   * carregado, enquanto a foto do produto ainda era placeholder. Nao era
+   * "imagem faltando", era imagem ERRADA, que e pior: ninguem percebe.
+   *
+   * Duas regras, nesta ordem:
+   *  1. URL vinda de `data-src` vence. data-src e lazy-load, e selo/banner nao
+   *     costuma ser lazy -- quem e lazy num card de listagem e a foto.
+   *  2. Senao, a de maior area renderizada. Selo e pequeno; foto nao. (Area so
+   *     serve entre imagens JA carregadas; por isso e a segunda regra --
+   *     placeholder tem area ~1 e perderia pro selo.)
+   */
+  function extrairMelhorImagem(cardEl) {
+    let porArea = null;
+    let maiorArea = -1;
+    for (const img of cardEl.querySelectorAll('img')) {
+      const r = urlDoImg(img);
+      if (!r) continue;
+      if (r.origem === 'data-src') return normalizarImagem(r.href);
+      const area = (img.naturalWidth || img.width || 0) * (img.naturalHeight || img.height || 0);
+      if (area > maiorArea) { maiorArea = area; porArea = r.href; }
+    }
+    return porArea ? normalizarImagem(porArea) : undefined;
+  }
+
+  /**
+   * Teto de releituras do mesmo card durante o autoscroll. Completar em vez de
+   * congelar tem um custo que congelar nao tinha: um card que NUNCA completa
+   * passaria a ser reprocessado em todos os scans. Seis tentativas cobrem com
+   * folga o tempo de hidratacao sem virar custo fixo.
+   */
+  const MAX_RELEITURAS = 6;
+
+  const novoAcumulador = () => ({ produtos: new Map(), tentativas: new Map(), prontos: new Set() });
+
+  /**
+   * Registra/completa um produto no acumulador, deduplicado por id.
+   *
+   * COMPLETA em vez de CONGELAR. Congelar a primeira leitura (`if (visto)
+   * return`) parece certo ate lembrar que o scan roda a cada poucos frames
+   * DURANTE o autoscroll: o card e lido no instante em que entra no DOM, antes
+   * da hidratacao, com o alt da imagem ainda vazio -- e o que faltasse ali
+   * faltava pra sempre. Num lote real da concorrente, 16 de 34 produtos da
+   * Amazon foram embora sem titulo, e o app gravava a palavra "Produto" no
+   * lugar, publicada no grupo do cliente.
+   *
+   * `ler()` so e chamada se ainda vale a pena reler: e ela que toca o DOM, e
+   * pular a chamada e o que economiza o custo.
+   */
+  function registrar(acc, id, ler) {
+    if (acc.prontos.has(id)) return;
+    const tentativa = (acc.tentativas.get(id) || 0) + 1;
+    if (tentativa > MAX_RELEITURAS) { acc.prontos.add(id); return; }
+    acc.tentativas.set(id, tentativa);
+
+    const novo = ler() || {};
+    const atual = acc.produtos.get(id) || {};
+    const junto = { ...atual };
+    for (const [chave, valor] of Object.entries(novo)) {
+      // Falsy nao substitui o que ja veio bom: '' e 0 e undefined sao "nao
+      // consegui ler agora", nunca "o valor e vazio".
+      if (junto[chave] === undefined && valor !== undefined && valor !== '' && valor !== 0) {
+        junto[chave] = valor;
+      }
+    }
+    acc.produtos.set(id, junto);
+    if (junto.title && junto.imageUrl && junto.price) acc.prontos.add(id);
+  }
+
+  window.__HUB = {
+    texto, parsePrecoBR, lerDinheiro, lerVendidos, lerPrecos,
+    normalizarImagem, extrairMelhorImagem, novoAcumulador, registrar,
+  };
 })(window);

@@ -26,4 +26,35 @@ assert.equal(H.lerVendidos('Mais de 50 mil vendidos'), 50000, 'mil separado');
 assert.equal(H.lerVendidos('1.234 vendidos'), 1234, 'milhar com ponto');
 assert.equal(H.lerVendidos('novo'), undefined, 'sem vendidos');
 
+// normalizarImagem: a URL da foto da Amazon carrega tamanho e formato no nome
+// do arquivo. O card da listagem traz a versao de vitrine -- pequena,
+// recortada, as vezes AVIF (que o WhatsApp nao renderiza). `_SL1600_` limita
+// o lado maior a 1600px e so REDUZ, nunca amplia, preservando o aspecto.
+const A = 'https://m.media-amazon.com/images/I/51G+D9DlGxL';
+assert.equal(H.normalizarImagem(`${A}._AC_SF226,226_QL85_.jpg`), `${A}._SL1600_.jpg`, 'crop pequeno');
+assert.equal(H.normalizarImagem(`${A}._AC_FMavif_SF217.5,435_QL54_.jpg`), `${A}._SL1600_.jpg`, 'avif recortado');
+// A extensao do arquivo e PRESERVADA, nao fixada em .jpg: forcar .jpg numa
+// imagem .png devolve 404, e trocar foto feia por foto quebrada e pior.
+assert.equal(H.normalizarImagem(`${A}._SS200_.png`), `${A}._SL1600_.png`, 'png segue png');
+assert.equal(H.normalizarImagem(`${A}.jpg?aicid=homepage`), `${A}._SL1600_.jpg`, 'query cai fora');
+// URL de outra loja passa intacta.
+const outra = 'https://http2.mlstatic.com/D_NQ_NP_123-MLB456.webp';
+assert.equal(H.normalizarImagem(outra), outra, 'nao-Amazon intacta');
+
+// registrar: COMPLETA em vez de congelar. Card lido antes da hidratacao volta
+// sem titulo; a proxima leitura preenche, sem sobrescrever o que ja veio bom.
+const acc = H.novoAcumulador();
+H.registrar(acc, 'MLB1', () => ({ url: 'u', title: '', price: 10 }));
+assert.equal(acc.produtos.get('MLB1').price, 10, 'preco da 1a leitura');
+assert.equal(acc.produtos.get('MLB1').title, undefined, 'titulo vazio nao entra');
+H.registrar(acc, 'MLB1', () => ({ url: 'u', title: 'Furadeira', price: 99 }));
+assert.equal(acc.produtos.get('MLB1').title, 'Furadeira', '2a leitura completa o titulo');
+assert.equal(acc.produtos.get('MLB1').price, 10, 'preco bom nao e sobrescrito');
+
+// Teto de releituras: card que nunca completa para de custar.
+const acc2 = H.novoAcumulador();
+let leituras = 0;
+for (let i = 0; i < 20; i++) H.registrar(acc2, 'MLB2', () => { leituras++; return { url: 'u' }; });
+assert.equal(leituras, 6, 'para em MAX_RELEITURAS');
+
 console.log('shared.check: ok');
