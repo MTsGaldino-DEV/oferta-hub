@@ -47,6 +47,24 @@ export function formasDoParticipante(p: { id: string; jid?: string; lid?: string
   return [p.id, p.jid, p.lid].filter((v): v is string => !!v);
 }
 
+/**
+ * Entre as ate tres formas de um participante, so uma pode carregar o
+ * numero de verdade -- groups.js preenche p.jid com o numero mesmo quando
+ * p.id veio em formato LID (mesmo achado do jidPreenchido em syncGroups).
+ * Sem isso, quem consome o participante (decidir(), extracao de numero pra
+ * exibir) nunca acha o DDI quando o grupo usa endereçamento LID, mesmo com
+ * o numero disponivel a uma consulta de distancia. Cai pra p.id (pode ser
+ * LID) quando nenhuma forma tem numero -- decidir()/numeroDoJid tratam
+ * LID como nao avaliavel, entao o fallback e seguro.
+ *
+ * Exportada: a rota de protecao usa a mesma escolha pro escaneamento e pra
+ * medir quantos participantes tem numero visivel.
+ */
+export function jidVisivelDoParticipante(p: { id: string; jid?: string; lid?: string }): string {
+  const numerico = formasDoParticipante(p).find((forma) => forma.toLowerCase().endsWith('@s.whatsapp.net'));
+  return numerico ?? p.id;
+}
+
 /** `meusIds` junta as duas identidades proprias (id e lid, sem sufixo de
  * dispositivo); `ehParticipanteProprio` testa as formas do participante
  * contra elas. */

@@ -1,9 +1,11 @@
+import type { GroupMetadata } from '@whiskeysockets/baileys';
+import { ModerationAction, ModerationReason } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { carregarConfig, salvarConfig, removerParticipante, DDI_PERMITIDO } from '../services/moderacao.js';
+import { carregarConfig, salvarConfig, removerParticipante, registrar, DDI_PERMITIDO } from '../services/moderacao.js';
 import { decidir, normalizarNumero, numeroDoJid } from '../services/protecao.js';
-import { semSufixoDispositivo, whatsapp } from '../whatsapp/baileys.js';
+import { formasDoParticipante, jidVisivelDoParticipante, semSufixoDispositivo, whatsapp } from '../whatsapp/baileys.js';
 
 /**
  * Quantos participantes dos grupos conhecidos tem numero visivel (JID
@@ -24,8 +26,12 @@ async function medirAvaliabilidade(
     const meta = await whatsapp.groupMetadata(grupo.jid);
     if (!meta) continue;
     for (const p of meta.participants) {
-      if (p.id.endsWith('@s.whatsapp.net')) comNumeroVisivel++;
-      else if (p.id.endsWith('@lid')) comLid++;
+      // p.id sozinho SUBESTIMA: groups.js preenche p.jid com o numero mesmo
+      // quando p.id veio em LID (mesmo achado do jidPreenchido em
+      // syncGroups) -- reusa jidVisivelDoParticipante em vez de repetir a
+      // mesma comparacao so com p.id.
+      if (jidVisivelDoParticipante(p).toLowerCase().endsWith('@s.whatsapp.net')) comNumeroVisivel++;
+      else comLid++;
     }
   }
   return { comNumeroVisivel, comLid, medido: true };
@@ -134,13 +140,25 @@ export async function protecaoRoutes(app: FastifyInstance) {
       const meta = await whatsapp.groupMetadata(grupo.jid);
       if (!meta) continue; // sem conexao agora -- nao da pra ler este grupo, nao inventa dado
 
+      // cada participante pode ter ate tres formas (id/jid/lid) -- juntar
+      // todas no Set e o mesmo defeito e a mesma correcao do botIsAdmin em
+      // baileys.ts e do admins de avaliarEntrada em moderacao.ts. So com
+      // p.id, um admin de verdade num grupo com endereçamento LID passaria
+      // pela guarda ADMIN e apareceria como removivel por engano.
       const admins = new Set(
-        meta.participants.filter((p) => p.admin === 'admin' || p.admin === 'superadmin').map((p) => p.id),
+        meta.participants
+          .filter((p) => p.admin === 'admin' || p.admin === 'superadmin')
+          .flatMap((p) => formasDoParticipante(p)),
       );
 
       for (const p of meta.participants) {
+        // jidVisivelDoParticipante: avalia pelo jid que carrega o numero
+        // quando existe, nao por p.id sozinho -- e o que faz decidir()
+        // achar o DDI de quem entrou por endereçamento LID (mesma correcao
+        // de jidPreenchido em syncGroups). numero exibido usa o mesmo jid.
+        const jidAvaliar = jidVisivelDoParticipante(p);
         const decisao = decidir({
-          jid: p.id,
+          jid: jidAvaliar,
           bloqueados,
           filtroDdiLigado: ddi,
           ddiPermitido: DDI_PERMITIDO,
@@ -153,7 +171,7 @@ export async function protecaoRoutes(app: FastifyInstance) {
             groupJid: grupo.jid,
             groupName: grupo.name,
             jid: p.id,
-            numero: numeroDoJid(p.id),
+            numero: numeroDoJid(jidAvaliar),
             motivo: decisao.motivo,
           });
         } else if (decisao.motivo === 'NAO_AVALIAVEL') {
@@ -187,9 +205,83 @@ export async function protecaoRoutes(app: FastifyInstance) {
     let removidos = 0;
     let falhas = 0;
     let pulados = 0;
-    const detalhes: { groupJid: string; jid: string; resultado: 'REMOVED' | 'FAILED' | 'SKIPPED' }[] = [];
+    const detalhes: {
+      groupJid: string;
+      jid: string;
+      resultado: 'REMOVED' | 'FAILED' | 'SKIPPED';
+      motivo?: 'PROPRIO' | 'ADMIN';
+    }[] = [];
+
+    // escanear ja filtra PROPRIO/ADMIN antes de oferecer o alvo na tela, mas
+    // isso e barreira do lado da tela -- um bug de frontend ou uma requisicao
+    // montada a mao chegaria direto aqui. Reafirma a guarda com metadata
+    // fresca no momento em que a remocao de fato aconteceria, reusando
+    // decidir() em vez de escrever uma terceira comparacao de identidade.
+    const metaPorGrupo = new Map<string, GroupMetadata | null>();
+    // meuJid/meuLid (nao so um): mesma razao de avaliarEntrada em
+    // moderacao.ts -- a propria conta pode nao ter numero visivel naquele
+    // grupo especifico, e essa e a ultima barreira antes de uma remocao
+    // irreversivel, entao vale a mesma robustez.
+    const meuJid = whatsapp.me ? semSufixoDispositivo(whatsapp.me) : null;
+    const meuLid = whatsapp.meLid ? semSufixoDispositivo(whatsapp.meLid) : null;
 
     for (const alvo of alvos) {
+      let meta = metaPorGrupo.get(alvo.groupJid);
+      if (meta === undefined) {
+        meta = await whatsapp.groupMetadata(alvo.groupJid);
+        metaPorGrupo.set(alvo.groupJid, meta);
+      }
+
+      if (!meta) {
+        // Sem metadata agora nao da pra reafirmar a guarda -- na duvida, nao
+        // remove. removerParticipante tambem falharia sozinho se o WhatsApp
+        // estiver desconectado, mas nao vale arriscar a janela em que o
+        // socket existe e so a consulta de metadata falhou.
+        await registrar(
+          alvo.groupJid,
+          alvo.jid,
+          ModerationAction.SKIPPED,
+          ModerationReason.MANUAL,
+          'sem metadata do grupo -- nao consegui reafirmar propria conta/admin',
+        );
+        detalhes.push({ ...alvo, resultado: 'SKIPPED' });
+        pulados++;
+        continue;
+      }
+
+      const admins = new Set(
+        meta.participants
+          .filter((p) => p.admin === 'admin' || p.admin === 'superadmin')
+          .flatMap((p) => formasDoParticipante(p)),
+      );
+      const jidProprio = (alvo.jid.toLowerCase().endsWith('@lid') && meuLid ? meuLid : meuJid) ?? '';
+
+      // bloqueados vazio e filtroDdi desligado: a remocao manual nao deve
+      // ser barrada por BLOCKLIST/FOREIGN_DDI (o usuario ja decidiu o alvo
+      // na tela) -- so PROPRIO/ADMIN interessam aqui, e sao as duas unicas
+      // guardas que decidir() aplica antes de olhar bloqueados/DDI.
+      const guarda = decidir({
+        jid: alvo.jid,
+        bloqueados: new Set(),
+        filtroDdiLigado: false,
+        ddiPermitido: DDI_PERMITIDO,
+        jidProprio,
+        admins,
+      });
+
+      if (guarda.motivo === 'PROPRIO' || guarda.motivo === 'ADMIN') {
+        await registrar(
+          alvo.groupJid,
+          alvo.jid,
+          ModerationAction.SKIPPED,
+          ModerationReason.MANUAL,
+          `guarda reafirmada no momento da remocao: ${guarda.motivo}`,
+        );
+        detalhes.push({ ...alvo, resultado: 'SKIPPED', motivo: guarda.motivo });
+        pulados++;
+        continue;
+      }
+
       const resultado = await removerParticipante(alvo.groupJid, alvo.jid, 'MANUAL');
       detalhes.push({ ...alvo, resultado });
       if (resultado === 'REMOVED') removidos++;
