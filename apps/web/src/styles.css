@@ -1275,6 +1275,12 @@ button.chip {
   cursor: pointer;
 }
 
+/* No garimpo o card nao abre editor -- so o botao age. Sem isso o cursor
+   promete um clique que nao existe. */
+.card--estatico {
+  cursor: default;
+}
+
 .card[data-leaving='true'] {
   opacity: 0;
   transform: translateY(-8px);
@@ -1373,7 +1379,8 @@ button.chip {
 /* Botao real por baixo do titulo (ver PriceTag.tsx): reseta aparencia de
    botao nativo e repete a tipografia que o h3 tinha, entao o que muda e so
    a semantica -- visualmente segue parecendo o titulo que sempre foi. */
-.card__titulo-btn {
+.card__titulo-btn,
+.card__titulo-txt {
   display: -webkit-box;
   width: 100%;
   border: none;
@@ -1388,6 +1395,9 @@ button.chip {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.card__titulo-btn {
   cursor: pointer;
 }
 
@@ -1471,6 +1481,19 @@ button.chip {
   letter-spacing: 0.03em;
   text-transform: none;
   font-weight: 600;
+}
+
+/* Nome da loja: minusculo e truncado. Loja da Shopee tem nome longo e
+   as vezes em caixa alta -- deixar herdar o uppercase do rodape faria a
+   linha gritar mais que o preco. */
+.card__loja {
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .card__erro {

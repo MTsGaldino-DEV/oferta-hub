@@ -59,24 +59,32 @@ export function Garimpar() {
       {aba === 'prontas' ? (
         <PesquisasProntas />
       ) : (
-        <div className="split">
-          <div>
-            <CategoriaMultiSelect
-              arvore={arvore}
-              selecionadas={filtros.categorias}
-              onChange={(categorias) => setFiltros((f) => ({ ...f, categorias }))}
-            />
+        <>
+          {/* Controles em cima, prateleira embaixo -- igual a fila. Os cards
+              precisam da largura inteira: espremidos em meia tela cabiam dois
+              por linha e a foto, que e o que faz garimpar, virava miniatura. */}
+          <div className="split">
+            <div>
+              <CategoriaMultiSelect
+                arvore={arvore}
+                selecionadas={filtros.categorias}
+                onChange={(categorias) => setFiltros((f) => ({ ...f, categorias }))}
+              />
+            </div>
+            <div>
+              <FiltrosBusca
+                filtros={filtros}
+                onChange={setFiltros}
+                onBuscar={() => void buscar(1)}
+                buscando={buscando}
+              />
+            </div>
           </div>
-          <div>
-            <FiltrosBusca
-              filtros={filtros}
-              onChange={setFiltros}
-              onBuscar={() => void buscar(1)}
-              buscando={buscando}
-            />
-            <ResultadoBusca resultado={resultado} buscando={buscando} onPagina={(p) => void buscar(p)} />
-          </div>
-        </div>
+
+          <div style={{ height: 20 }} />
+
+          <ResultadoBusca resultado={resultado} buscando={buscando} onPagina={(p) => void buscar(p)} />
+        </>
       )}
     </>
   );

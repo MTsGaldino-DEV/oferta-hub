@@ -11,14 +11,14 @@ interface Props {
 }
 
 /** "+38 mil vendidos". Abaixo de mil, o numero cheio -- arredondar mentiria. */
-function vendidos(n: number | null): string | null {
+export function vendidos(n: number | null): string | null {
   if (!n || n < 1) return null;
   if (n < 1000) return `${n} vendidos`;
   return `+${Math.floor(n / 1000)} mil vendidos`;
 }
 
 /** Acima disso a prateleira ja provou que o produto sai. */
-const CAMPEAO = 5000;
+export const CAMPEAO = 5000;
 
 /**
  * Card da fila. E onde voce decide "manda ou pula", entao a hierarquia e:

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { api, brl, int } from '../../api.js';
+import { api, brl, int, STORE } from '../../api.js';
+import { CAMPEAO, vendidos } from '../../components/PriceTag.js';
 import type { Produto, Resultado } from './tipos.js';
 
 interface Props {
@@ -11,14 +12,13 @@ interface Props {
 /** Estado do envio pra fila, por produto. */
 type Envio = 'enviando' | 'na-fila' | { erro: string };
 
-function desconto(p: Produto): string {
+/** Desconto em pontos percentuais, 0 quando nao da pra comparar. */
+function desconto(p: Produto): number {
   if (p.listPrice && p.price && p.listPrice > p.price) {
-    return `${Math.round((1 - p.price / p.listPrice) * 100)}%`;
+    return Math.round((1 - p.price / p.listPrice) * 100);
   }
-  return '—';
+  return 0;
 }
-
-const pct = (v: number | null) => (v === null ? '—' : `${v.toFixed(0)}%`);
 
 export function ResultadoBusca({ resultado, buscando, onPagina }: Props) {
   const [envios, setEnvios] = useState<Record<string, Envio>>({});
@@ -58,7 +58,7 @@ export function ResultadoBusca({ resultado, buscando, onPagina }: Props) {
   // pagina vazia nao significa fim dos resultados -- sem os controles aqui,
   // pagina 1 vazia nao deixa ver a 2, e pagina 3 vazia prende o usuario sem volta.
   const paginacao = (
-    <div className="row" style={{ marginTop: 12, alignItems: 'center' }}>
+    <div className="row" style={{ marginTop: 14, alignItems: 'center' }}>
       <button
         className="btn btn--ghost btn--sm"
         disabled={resultado.pageInfo.page <= 1}
@@ -105,79 +105,83 @@ export function ResultadoBusca({ resultado, buscando, onPagina }: Props) {
         </div>
       )}
 
-      <p style={{ color: 'var(--muted)', fontSize: 13 }}>
+      <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
         {int(resultado.produtos.length)} de {int(resultado.bruto)} encontrados
         {resultado.categorias.length > 0 && ` em ${resultado.categorias.length} categoria(s)`}
       </p>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Produto</th>
-            <th className="num">Preço</th>
-            <th className="num">Desconto</th>
-            <th className="num">Comissão</th>
-            <th className="num">Vendedor</th>
-            <th className="num">Vendas</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {resultado.produtos.map((p) => {
-            const envio = envios[p.externalId];
-            return (
-              <tr key={p.externalId}>
-                <td>
-                  <div className="cell-product">
-                    {p.imageUrl && <img src={p.imageUrl} alt="" loading="lazy" />}
-                    <span>
-                      {p.title}
-                      <br />
-                      <small style={{ color: 'var(--muted)' }}>{p.shopName ?? '—'}</small>
-                      {typeof envio === 'object' && (
-                        <>
-                          <br />
-                          <small style={{ color: 'var(--drop)' }}>{envio.erro}</small>
-                        </>
-                      )}
-                    </span>
+      <div className="shelf">
+        {resultado.produtos.map((p) => {
+          const envio = envios[p.externalId];
+          const off = desconto(p);
+          const vendas = vendidos(p.soldCount);
+          // sellerCommissionPct e o que separa oferta boa de oferta comum: a base
+          // da loja fica fixa, o extra do vendedor e o que varia. Cai pra base so
+          // quando a Shopee nao mandou o extra.
+          const comissao = p.sellerCommissionPct ?? p.commissionPct;
+
+          return (
+            <article key={p.externalId} className="card card--estatico">
+              <div className="card__well">
+                {p.imageUrl ? (
+                  <img src={p.imageUrl} alt="" loading="lazy" />
+                ) : (
+                  <span className="card__semfoto">sem foto</span>
+                )}
+                {off > 0 && <span className="card__off--badge">-{off}%</span>}
+              </div>
+
+              <div className="card__corpo">
+                {(p.soldCount ?? 0) >= CAMPEAO && <span className="card__selo">Mais vendido</span>}
+
+                <h3 className="card__titulo">
+                  <span className="card__titulo-txt" title={p.title}>
+                    {p.title}
+                  </span>
+                </h3>
+
+                <div className="card__meta">
+                  {p.rating ? <span className="card__estrela">★ {p.rating.toFixed(1)}</span> : null}
+                  {vendas && <span>{vendas}</span>}
+                </div>
+
+                {comissao !== null && (
+                  <div className="card__ganho" title="Comissão do vendedor por cima da base da loja">
+                    {p.commissionBrl !== null ? `Ganha ${brl(p.commissionBrl)}` : 'Comissão'}
+                    <em>{comissao.toFixed(0)}%</em>
                   </div>
-                </td>
-                <td className="num">{brl(p.price)}</td>
-                <td className="num">{desconto(p)}</td>
-                <td className="num">{pct(p.commissionPct)}</td>
-                <td className="num">
-                  <strong>{pct(p.sellerCommissionPct)}</strong>
-                  {p.commissionBrl !== null && (
-                    <>
-                      <br />
-                      <small style={{ color: 'var(--muted)' }}>{brl(p.commissionBrl)}</small>
-                    </>
-                  )}
-                </td>
-                <td className="num">
-                  <strong>{int(p.soldCount)}</strong>
-                </td>
-                <td className="num">
-                  {envio === 'na-fila' ? (
-                    <span className="chip" data-tone="on">
-                      na fila
-                    </span>
-                  ) : (
-                    <button
-                      className="btn btn--ghost btn--sm"
-                      disabled={envio === 'enviando'}
-                      onClick={() => void mandarPraFila(p)}
-                    >
-                      {envio === 'enviando' ? 'Enviando...' : 'Mandar pra fila'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                )}
+
+                <div className="card__precos">
+                  {p.listPrice && p.price && p.listPrice > p.price ? (
+                    <span className="card__antes">{brl(p.listPrice)}</span>
+                  ) : null}
+                  <div className="card__linha">
+                    <span className="card__agora">{brl(p.price)}</span>
+                  </div>
+                </div>
+
+                <div className="card__origem">
+                  {STORE[p.platform] ?? p.platform}
+                  {p.shopName && <span className="card__loja">{p.shopName}</span>}
+                </div>
+
+                {typeof envio === 'object' && <div className="card__erro">{envio.erro}</div>}
+
+                <div className="card__acoes">
+                  <button
+                    className="btn btn--alvo card__enviar"
+                    disabled={envio === 'enviando' || envio === 'na-fila'}
+                    onClick={() => void mandarPraFila(p)}
+                  >
+                    {envio === 'na-fila' ? '✓ Na fila' : envio === 'enviando' ? 'Enviando...' : 'Mandar pra fila'}
+                  </button>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
 
       {paginacao}
     </>
