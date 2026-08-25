@@ -42,10 +42,68 @@ interface EscanearResposta {
   gruposSemAdmin: { jid: string; name: string }[];
 }
 
+interface DetalheRemocao {
+  groupJid: string;
+  jid: string;
+  resultado: 'REMOVED' | 'FAILED' | 'SKIPPED';
+  motivo?: 'PROPRIO' | 'ADMIN' | 'SEM_METADATA' | 'TETO_DIARIO';
+}
+
 interface RemoverResposta {
   removidos: number;
   falhas: number;
   pulados: number;
+  detalhes: DetalheRemocao[];
+}
+
+// achados da selecao no momento da remocao -- o placar so tem groupJid/jid,
+// guarda o resto (nome do grupo, numero formatado) pra nao perder a
+// referencia quando resultado e limpo logo em seguida.
+type PlacarComContexto = RemoverResposta & { achados: Achado[] };
+
+interface BloqueadoResposta extends Bloqueado {
+  ddiAssumido: boolean;
+}
+
+interface HistoricoItem {
+  id: string;
+  groupJid: string;
+  groupName: string | null;
+  participant: string;
+  action: 'REMOVED' | 'FAILED' | 'SKIPPED';
+  reason: 'BLOCKLIST' | 'FOREIGN_DDI' | 'MANUAL';
+  detail: string | null;
+  occurredAt: string;
+}
+
+interface HistoricoResposta {
+  total: number;
+  itens: HistoricoItem[];
+}
+
+const ACAO_LABEL: Record<HistoricoItem['action'], string> = {
+  REMOVED: 'removido',
+  FAILED: 'falhou',
+  SKIPPED: 'pulado',
+};
+
+const REASON_LABEL: Record<HistoricoItem['reason'], string> = {
+  BLOCKLIST: 'blocklist',
+  FOREIGN_DDI: 'DDI estrangeiro',
+  MANUAL: 'manual',
+};
+
+const MOTIVO_SKIP_LABEL: Record<NonNullable<DetalheRemocao['motivo']>, string> = {
+  PROPRIO: 'é a própria conta',
+  ADMIN: 'é admin do grupo',
+  SEM_METADATA: 'não consegui confirmar o grupo',
+  TETO_DIARIO: 'teto diário de remoções atingido',
+};
+
+function rotuloDetalhe(d: DetalheRemocao): string {
+  if (d.resultado === 'REMOVED') return 'removido';
+  if (d.resultado === 'FAILED') return 'falhou';
+  return d.motivo ? `pulado — ${MOTIVO_SKIP_LABEL[d.motivo]}` : 'pulado';
 }
 
 // So formata o padrao BR (o unico que o produto trata) -- qualquer outro
@@ -53,7 +111,12 @@ interface RemoverResposta {
 function formatarNumero(digitos: string): string {
   if (digitos.startsWith('55') && (digitos.length === 12 || digitos.length === 13)) {
     const ddd = digitos.slice(2, 4);
-    const resto = digitos.slice(4);
+    let resto = digitos.slice(4);
+    // normalizarNumero (backend) colapsa o nono digito do celular na forma
+    // canonica -- reinsere so na EXIBICAO, senao quem digitou com o 9 ve ele
+    // sumir e parece erro de digitacao. Nao mexe na forma canonica salva.
+    // Heuristica BR: fixo tem 8 digitos comecando em 2-5, celular em 6-9.
+    if (resto.length === 8 && /^[6-9]/.test(resto)) resto = '9' + resto;
     const corte = resto.length === 9 ? 5 : 4;
     return `+55 (${ddd}) ${resto.slice(0, corte)}-${resto.slice(corte)}`;
   }
@@ -66,6 +129,7 @@ export function Protecao() {
 
   const [numero, setNumero] = useState('');
   const [erroBloqueio, setErroBloqueio] = useState<string | null>(null);
+  const [avisoDdiAssumido, setAvisoDdiAssumido] = useState(false);
   const [adicionando, setAdicionando] = useState(false);
 
   const [critBlocklist, setCritBlocklist] = useState(true);
@@ -75,30 +139,54 @@ export function Protecao() {
   const [resultado, setResultado] = useState<EscanearResposta | null>(null);
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [removendo, setRemovendo] = useState(false);
-  const [placar, setPlacar] = useState<RemoverResposta | null>(null);
+  const [placar, setPlacar] = useState<PlacarComContexto | null>(null);
+
+  const [historico, setHistorico] = useState<HistoricoResposta | null>(null);
+  const [erroHistorico, setErroHistorico] = useState<string | null>(null);
+  const [carregandoHistorico, setCarregandoHistorico] = useState(false);
 
   async function carregar() {
     setDados(await api.get<ProtecaoResposta>('/api/protecao'));
   }
 
+  async function carregarHistorico(offset: number) {
+    setCarregandoHistorico(true);
+    try {
+      const res = await api.get<HistoricoResposta>(`/api/protecao/historico?limit=20&offset=${offset}`);
+      setHistorico((atual) => (offset === 0 || !atual ? res : { total: res.total, itens: [...atual.itens, ...res.itens] }));
+    } catch (err) {
+      setErroHistorico(err instanceof Error ? err.message : 'Não consegui carregar o histórico.');
+    } finally {
+      setCarregandoHistorico(false);
+    }
+  }
+
   useEffect(() => {
     void carregar().catch((e) => setErro(e instanceof Error ? e.message : 'Não consegui carregar a proteção.'));
+    void carregarHistorico(0);
   }, []);
 
   async function alternar(campo: 'escudo' | 'ddi') {
     if (!dados) return;
-    const res = await api.put<{ escudo: boolean; ddi: boolean }>('/api/protecao', { [campo]: !dados[campo] });
-    setDados((d) => (d ? { ...d, ...res } : d));
+    setErro(null);
+    try {
+      const res = await api.put<{ escudo: boolean; ddi: boolean }>('/api/protecao', { [campo]: !dados[campo] });
+      setDados((d) => (d ? { ...d, ...res } : d));
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Não consegui atualizar a proteção.');
+    }
   }
 
   async function adicionarNumero(e: React.FormEvent) {
     e.preventDefault();
     if (!numero.trim()) return;
     setErroBloqueio(null);
+    setAvisoDdiAssumido(false);
     setAdicionando(true);
     try {
-      await api.post('/api/protecao/bloqueados', { numero });
+      const res = await api.post<BloqueadoResposta>('/api/protecao/bloqueados', { numero });
       setNumero('');
+      setAvisoDdiAssumido(res.ddiAssumido);
       await carregar();
     } catch (err) {
       setErroBloqueio(err instanceof Error ? err.message : 'Não consegui adicionar o número.');
@@ -108,8 +196,13 @@ export function Protecao() {
   }
 
   async function removerBloqueado(id: string) {
-    await api.del(`/api/protecao/bloqueados/${id}`);
-    await carregar();
+    setErroBloqueio(null);
+    try {
+      await api.del(`/api/protecao/bloqueados/${id}`);
+      await carregar();
+    } catch (err) {
+      setErroBloqueio(err instanceof Error ? err.message : 'Não consegui remover o número.');
+    }
   }
 
   async function escanear() {
@@ -147,19 +240,23 @@ export function Protecao() {
 
   async function removerSelecionados() {
     if (!resultado) return;
-    const alvos = resultado.achados
-      .filter((a) => selecionados.has(`${a.groupJid}|${a.jid}`))
-      .map((a) => ({ groupJid: a.groupJid, jid: a.jid }));
-    if (alvos.length === 0) return;
-    if (!confirm(`Remover ${alvos.length} pessoa${alvos.length === 1 ? '' : 's'} dos grupos? Essa ação é irreversível.`)) {
+    const achadosSelecionados = resultado.achados.filter((a) => selecionados.has(`${a.groupJid}|${a.jid}`));
+    if (achadosSelecionados.length === 0) return;
+    if (
+      !confirm(
+        `Remover ${achadosSelecionados.length} pessoa${achadosSelecionados.length === 1 ? '' : 's'} dos grupos? Essa ação é irreversível.`,
+      )
+    ) {
       return;
     }
     setRemovendo(true);
     try {
+      const alvos = achadosSelecionados.map((a) => ({ groupJid: a.groupJid, jid: a.jid }));
       const res = await api.post<RemoverResposta>('/api/protecao/remover', { alvos });
-      setPlacar(res);
+      setPlacar({ ...res, achados: achadosSelecionados });
       setResultado(null);
       setSelecionados(new Set());
+      void carregarHistorico(0);
     } catch (err) {
       setErroEscaneio(err instanceof Error ? err.message : 'Não consegui remover.');
     } finally {
@@ -171,7 +268,7 @@ export function Protecao() {
     <>
       <div className="head">
         <div>
-          <h1>Proteção</h1>
+          <h2 style={{ margin: 0 }}>Proteção</h2>
           <p>
             Mantém os grupos limpos e reduz o risco de banimento — vale para os grupos onde o número conectado é
             admin.
@@ -200,6 +297,17 @@ export function Protecao() {
                 Remove na entrada quem estiver na blocklist abaixo.
               </p>
 
+              {(() => {
+                const semAdmin = dados.grupos.filter((g) => !g.botIsAdmin);
+                if (semAdmin.length === 0) return null;
+                return (
+                  <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+                    Não protegido em {semAdmin.length} grupo{semAdmin.length === 1 ? '' : 's'} onde você não é admin:{' '}
+                    {semAdmin.map((g) => g.name).join(', ')}.
+                  </p>
+                );
+              })()}
+
               <form onSubmit={(e) => void adicionarNumero(e)} className="row" style={{ marginTop: 14 }}>
                 <div className="field" style={{ flex: '1 1 220px' }}>
                   <label htmlFor="numero">Número com DDI</label>
@@ -214,6 +322,11 @@ export function Protecao() {
                   {adicionando ? 'Adicionando...' : 'Adicionar'}
                 </button>
               </form>
+              {avisoDdiAssumido && (
+                <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
+                  Número sem DDI — assumimos +55 (Brasil).
+                </div>
+              )}
               {erroBloqueio && <div className="notice" style={{ marginTop: 10 }}>{erroBloqueio}</div>}
 
               {dados.bloqueados.length === 0 ? (
@@ -350,12 +463,88 @@ export function Protecao() {
 
             {placar && (
               <div className="notice" data-tone="warn" style={{ marginTop: 14 }}>
-                Removidos: {placar.removidos} · Falhas: {placar.falhas} · Pulados: {placar.pulados}
+                <div>
+                  Removidos: {placar.removidos} · Falhas: {placar.falhas} · Pulados: {placar.pulados}
+                </div>
+                {(() => {
+                  const tetoDiario = placar.detalhes.filter((d) => d.motivo === 'TETO_DIARIO').length;
+                  if (tetoDiario === 0) return null;
+                  return (
+                    <div style={{ marginTop: 4 }}>
+                      {tetoDiario} pessoa{tetoDiario === 1 ? '' : 's'} ficaram para depois: teto diário de remoções
+                      atingido hoje.
+                    </div>
+                  );
+                })()}
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {placar.detalhes.map((d) => {
+                    const achado = placar.achados.find((a) => a.groupJid === d.groupJid && a.jid === d.jid);
+                    return (
+                      <div key={`${d.groupJid}|${d.jid}`} style={{ fontSize: 13 }}>
+                        {achado ? `${formatarNumero(achado.numero ?? '')} · ${achado.groupName}` : d.jid} —{' '}
+                        {rotuloDetalhe(d)}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
         </>
       )}
+
+      <div className="panel" style={{ marginTop: 16 }}>
+        <h2 className="panel__title">Histórico</h2>
+        <p style={{ marginTop: 0, fontSize: 13, color: 'var(--muted)' }}>
+          Últimas ações de moderação registradas nos seus grupos.
+        </p>
+
+        {erroHistorico && <div className="notice">{erroHistorico}</div>}
+
+        {historico && historico.itens.length === 0 && !erroHistorico && (
+          <div className="empty">
+            <strong>Nenhuma ação de moderação ainda.</strong>
+          </div>
+        )}
+
+        {historico && historico.itens.length > 0 && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+              {historico.itens.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    padding: '6px 2px',
+                    borderBottom: '1px solid var(--line)',
+                    fontSize: 13,
+                  }}
+                >
+                  <span style={{ color: 'var(--muted)' }}>
+                    {new Date(item.occurredAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                  </span>
+                  <span>{item.groupName ?? item.groupJid}</span>
+                  <span className="chip">{ACAO_LABEL[item.action]}</span>
+                  <span style={{ color: 'var(--muted)' }}>{REASON_LABEL[item.reason]}</span>
+                  {item.detail && <span style={{ color: 'var(--muted)' }}>{item.detail}</span>}
+                </div>
+              ))}
+            </div>
+            {historico.itens.length < historico.total && (
+              <button
+                className="btn btn--ghost btn--sm"
+                style={{ marginTop: 12 }}
+                disabled={carregandoHistorico}
+                onClick={() => void carregarHistorico(historico.itens.length)}
+              >
+                {carregandoHistorico ? 'Carregando...' : 'Carregar mais'}
+              </button>
+            )}
+          </>
+        )}
+      </div>
     </>
   );
 }

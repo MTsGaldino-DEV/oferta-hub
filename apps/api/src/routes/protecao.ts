@@ -6,6 +6,15 @@ import { prisma } from '../db.js';
 import { carregarConfig, salvarConfig, removerParticipante, registrar, DDI_PERMITIDO } from '../services/moderacao.js';
 import { decidir, normalizarNumero, numeroDoJid } from '../services/protecao.js';
 import { formasDoParticipante, jidVisivelDoParticipante, semSufixoDispositivo, whatsapp } from '../whatsapp/baileys.js';
+import { logger } from '../lib/logger.js';
+
+const DESCONECTADO = 'WhatsApp desconectado. Conecte em Configurações › Canais para {acao}.';
+
+// TTL do cache de metadata por grupo dentro de um lote de remocao -- um lote
+// grande demora minutos (moderacaoIntervaloSegundos entre cada remocao), e
+// reusar a mesma foto de admins do inicio ao fim do lote inteiro arrisca agir
+// sobre um admin que so foi promovido depois que o lote comecou.
+const TTL_METADATA_MS = 60_000;
 
 /**
  * Quantos participantes dos grupos conhecidos tem numero visivel (JID
@@ -67,7 +76,7 @@ export async function protecaoRoutes(app: FastifyInstance) {
   app.post<{ Body: { numero: string; note?: string } }>('/api/protecao/bloqueados', async (req, reply) => {
     const { numero, note } = z
       .object({
-        numero: z.string().min(1, 'Numero obrigatorio.'),
+        numero: z.string().min(1, 'Número obrigatório.'),
         note: z.string().trim().optional(),
       })
       .parse(req.body);
@@ -82,7 +91,7 @@ export async function protecaoRoutes(app: FastifyInstance) {
     const normalizado = normalizarNumero(ddiAssumido ? `55${digitos}` : numero);
 
     if (!normalizado) {
-      return reply.code(400).send({ error: 'Numero invalido. Informe DDD + numero, com ou sem o DDI do pais.' });
+      return reply.code(400).send({ error: 'Número inválido. Informe DDD + número, com ou sem o DDI do país.' });
     }
 
     const existente = await prisma.blockedNumber.findUnique({ where: { phone: normalizado } });
@@ -92,8 +101,12 @@ export async function protecaoRoutes(app: FastifyInstance) {
     return { ...criado, ddiAssumido };
   });
 
-  app.delete<{ Params: { id: string } }>('/api/protecao/bloqueados/:id', async (req) => {
-    await prisma.blockedNumber.delete({ where: { id: req.params.id } }).catch(() => undefined);
+  app.delete<{ Params: { id: string } }>('/api/protecao/bloqueados/:id', async (req, reply) => {
+    // deleteMany em vez de delete: nao lanca quando o id nao existe, e o
+    // count diz se algo foi de fato apagado -- {ok:true} pra um id inexistente
+    // esconderia um bug de frontend (id errado) atras de sucesso falso.
+    const { count } = await prisma.blockedNumber.deleteMany({ where: { id: req.params.id } });
+    if (count === 0) return reply.code(404).send({ error: 'Número não encontrado na blocklist.' });
     return { ok: true };
   });
 
@@ -107,8 +120,15 @@ export async function protecaoRoutes(app: FastifyInstance) {
       .object({ blocklist: z.boolean(), ddi: z.boolean() })
       .parse(req.body);
 
+    // Escanear desconectado le zero grupos e devolve achados:[] -- a tela
+    // mostraria "ninguem se encaixa" como se os grupos estivessem limpos,
+    // quando na verdade nada foi lido. Falha explicita em vez disso.
+    if (whatsapp.status !== 'connected') {
+      return reply.code(400).send({ error: DESCONECTADO.replace('{acao}', 'escanear') });
+    }
+
     if (!blocklist && !ddi) {
-      return reply.code(400).send({ error: 'Marque pelo menos um criterio (Escudo ou Filtro de DDI) para escanear.' });
+      return reply.code(400).send({ error: 'Marque pelo menos um critério (Na blocklist ou DDI estrangeiro) para escanear.' });
     }
 
     const grupos = await prisma.whatsappGroup.findMany();
@@ -125,7 +145,15 @@ export async function protecaoRoutes(app: FastifyInstance) {
         )
       : new Set<string>();
 
-    const eu = whatsapp.me ? semSufixoDispositivo(whatsapp.me) : '';
+    // meuJid/meuLid (nao so um): mesma razao das outras duas rotas -- a
+    // propria conta pode nao ter numero visivel no grupo. O fallback ''
+    // que existia aqui antes desligava a guarda PROPRIO em silencio (ver
+    // mesmoParticipante em services/protecao.ts); melhor falhar explicito.
+    const meuJid = whatsapp.me ? semSufixoDispositivo(whatsapp.me) : null;
+    const meuLid = whatsapp.meLid ? semSufixoDispositivo(whatsapp.meLid) : null;
+    if (!meuJid && !meuLid) {
+      return reply.code(400).send({ error: 'Não foi possível confirmar a própria conta no WhatsApp. Tente novamente.' });
+    }
 
     const achados: {
       groupJid: string;
@@ -157,12 +185,16 @@ export async function protecaoRoutes(app: FastifyInstance) {
         // achar o DDI de quem entrou por endereçamento LID (mesma correcao
         // de jidPreenchido em syncGroups). numero exibido usa o mesmo jid.
         const jidAvaliar = jidVisivelDoParticipante(p);
+        // Mesma escolha por formato de avaliarEntrada: usa a forma da propria
+        // conta que combina com o jid avaliado, caindo pra outra so quando a
+        // preferida nao existe (garantido nao-nula pelo guard acima).
+        const jidProprio = (jidAvaliar.toLowerCase().endsWith('@lid') ? meuLid ?? meuJid : meuJid ?? meuLid) as string;
         const decisao = decidir({
           jid: jidAvaliar,
           bloqueados,
           filtroDdiLigado: ddi,
           ddiPermitido: DDI_PERMITIDO,
-          jidProprio: eu,
+          jidProprio,
           admins,
         });
 
@@ -188,7 +220,7 @@ export async function protecaoRoutes(app: FastifyInstance) {
    * "remova tudo que se encaixa". O que ele viu e exatamente o que sai, sem
    * janela pra alguem novo entrar na conta entre o escaneamento e a remocao.
    */
-  app.post<{ Body: { alvos: { groupJid: string; jid: string }[] } }>('/api/protecao/remover', async (req) => {
+  app.post<{ Body: { alvos: { groupJid: string; jid: string }[] } }>('/api/protecao/remover', async (req, reply) => {
     const { alvos } = z
       .object({
         alvos: z
@@ -202,6 +234,12 @@ export async function protecaoRoutes(app: FastifyInstance) {
       })
       .parse(req.body);
 
+    // Mesmo problema do escanear, do lado destrutivo: sem isso, remover
+    // desconectado devolveria "Pulados: N" sem dizer que a causa e a conexao.
+    if (whatsapp.status !== 'connected') {
+      return reply.code(400).send({ error: DESCONECTADO.replace('{acao}', 'remover') });
+    }
+
     let removidos = 0;
     let falhas = 0;
     let pulados = 0;
@@ -209,7 +247,7 @@ export async function protecaoRoutes(app: FastifyInstance) {
       groupJid: string;
       jid: string;
       resultado: 'REMOVED' | 'FAILED' | 'SKIPPED';
-      motivo?: 'PROPRIO' | 'ADMIN';
+      motivo?: 'PROPRIO' | 'ADMIN' | 'SEM_METADATA' | 'TETO_DIARIO';
     }[] = [];
 
     // escanear ja filtra PROPRIO/ADMIN antes de oferecer o alvo na tela, mas
@@ -217,78 +255,144 @@ export async function protecaoRoutes(app: FastifyInstance) {
     // montada a mao chegaria direto aqui. Reafirma a guarda com metadata
     // fresca no momento em que a remocao de fato aconteceria, reusando
     // decidir() em vez de escrever uma terceira comparacao de identidade.
-    const metaPorGrupo = new Map<string, GroupMetadata | null>();
+    // buscadoEm por grupo: TTL_METADATA_MS evita reusar a mesma foto de
+    // admins do inicio ao fim de um lote grande (minutos, dado o intervalo
+    // entre remocoes) -- sem isso, alguem promovido a admin no meio do lote
+    // continuaria avaliado com dado velho ate o fim.
+    const metaPorGrupo = new Map<string, { meta: GroupMetadata | null; buscadoEm: number }>();
     // meuJid/meuLid (nao so um): mesma razao de avaliarEntrada em
     // moderacao.ts -- a propria conta pode nao ter numero visivel naquele
     // grupo especifico, e essa e a ultima barreira antes de uma remocao
-    // irreversivel, entao vale a mesma robustez.
+    // irreversivel, entao vale a mesma robustez. O fallback '' que existia
+    // aqui antes desligava a guarda PROPRIO em silencio.
     const meuJid = whatsapp.me ? semSufixoDispositivo(whatsapp.me) : null;
     const meuLid = whatsapp.meLid ? semSufixoDispositivo(whatsapp.meLid) : null;
+    if (!meuJid && !meuLid) {
+      return reply.code(400).send({ error: 'Não foi possível confirmar a própria conta no WhatsApp. Tente novamente.' });
+    }
 
     for (const alvo of alvos) {
-      let meta = metaPorGrupo.get(alvo.groupJid);
-      if (meta === undefined) {
-        meta = await whatsapp.groupMetadata(alvo.groupJid);
-        metaPorGrupo.set(alvo.groupJid, meta);
-      }
+      // Por alvo: uma falha inesperada (ex: groupMetadata derrubou por erro
+      // de rede) nao pode abortar o lote inteiro e descartar os detalhes de
+      // quem ja saiu antes dela.
+      try {
+        let entrada = metaPorGrupo.get(alvo.groupJid);
+        if (!entrada || Date.now() - entrada.buscadoEm > TTL_METADATA_MS) {
+          entrada = { meta: await whatsapp.groupMetadata(alvo.groupJid), buscadoEm: Date.now() };
+          metaPorGrupo.set(alvo.groupJid, entrada);
+        }
+        const meta = entrada.meta;
 
-      if (!meta) {
-        // Sem metadata agora nao da pra reafirmar a guarda -- na duvida, nao
-        // remove. removerParticipante tambem falharia sozinho se o WhatsApp
-        // estiver desconectado, mas nao vale arriscar a janela em que o
-        // socket existe e so a consulta de metadata falhou.
-        await registrar(
-          alvo.groupJid,
-          alvo.jid,
-          ModerationAction.SKIPPED,
-          ModerationReason.MANUAL,
-          'sem metadata do grupo -- nao consegui reafirmar propria conta/admin',
+        if (!meta) {
+          // Sem metadata agora nao da pra reafirmar a guarda -- na duvida, nao
+          // remove. removerParticipante tambem falharia sozinho se o WhatsApp
+          // estiver desconectado, mas nao vale arriscar a janela em que o
+          // socket existe e so a consulta de metadata falhou.
+          await registrar(
+            alvo.groupJid,
+            alvo.jid,
+            ModerationAction.SKIPPED,
+            ModerationReason.MANUAL,
+            'sem metadata do grupo -- nao consegui reafirmar propria conta/admin',
+          );
+          detalhes.push({ ...alvo, resultado: 'SKIPPED', motivo: 'SEM_METADATA' });
+          pulados++;
+          continue;
+        }
+
+        const admins = new Set(
+          meta.participants
+            .filter((p) => p.admin === 'admin' || p.admin === 'superadmin')
+            .flatMap((p) => formasDoParticipante(p)),
         );
-        detalhes.push({ ...alvo, resultado: 'SKIPPED' });
-        pulados++;
-        continue;
-      }
+        // Mesma escolha por formato do escanear/avaliarEntrada -- garantido
+        // nao-nula pelo guard de meuJid/meuLid acima.
+        const jidProprio = (alvo.jid.toLowerCase().endsWith('@lid') ? meuLid ?? meuJid : meuJid ?? meuLid) as string;
 
-      const admins = new Set(
-        meta.participants
-          .filter((p) => p.admin === 'admin' || p.admin === 'superadmin')
-          .flatMap((p) => formasDoParticipante(p)),
-      );
-      const jidProprio = (alvo.jid.toLowerCase().endsWith('@lid') && meuLid ? meuLid : meuJid) ?? '';
+        // bloqueados vazio e filtroDdi desligado: a remocao manual nao deve
+        // ser barrada por BLOCKLIST/FOREIGN_DDI (o usuario ja decidiu o alvo
+        // na tela) -- so PROPRIO/ADMIN interessam aqui, e sao as duas unicas
+        // guardas que decidir() aplica antes de olhar bloqueados/DDI.
+        const guarda = decidir({
+          jid: alvo.jid,
+          bloqueados: new Set(),
+          filtroDdiLigado: false,
+          ddiPermitido: DDI_PERMITIDO,
+          jidProprio,
+          admins,
+        });
 
-      // bloqueados vazio e filtroDdi desligado: a remocao manual nao deve
-      // ser barrada por BLOCKLIST/FOREIGN_DDI (o usuario ja decidiu o alvo
-      // na tela) -- so PROPRIO/ADMIN interessam aqui, e sao as duas unicas
-      // guardas que decidir() aplica antes de olhar bloqueados/DDI.
-      const guarda = decidir({
-        jid: alvo.jid,
-        bloqueados: new Set(),
-        filtroDdiLigado: false,
-        ddiPermitido: DDI_PERMITIDO,
-        jidProprio,
-        admins,
-      });
+        if (guarda.motivo === 'PROPRIO' || guarda.motivo === 'ADMIN') {
+          await registrar(
+            alvo.groupJid,
+            alvo.jid,
+            ModerationAction.SKIPPED,
+            ModerationReason.MANUAL,
+            `guarda reafirmada no momento da remocao: ${guarda.motivo}`,
+          );
+          detalhes.push({ ...alvo, resultado: 'SKIPPED', motivo: guarda.motivo });
+          pulados++;
+          continue;
+        }
 
-      if (guarda.motivo === 'PROPRIO' || guarda.motivo === 'ADMIN') {
-        await registrar(
-          alvo.groupJid,
-          alvo.jid,
-          ModerationAction.SKIPPED,
-          ModerationReason.MANUAL,
-          `guarda reafirmada no momento da remocao: ${guarda.motivo}`,
+        const { resultado, tetoDiario } = await removerParticipante(alvo.groupJid, alvo.jid, 'MANUAL');
+        detalhes.push({ ...alvo, resultado, motivo: tetoDiario ? 'TETO_DIARIO' : undefined });
+        if (resultado === 'REMOVED') removidos++;
+        else if (resultado === 'FAILED') falhas++;
+        else pulados++;
+      } catch (err) {
+        logger.error(
+          { err, groupJid: alvo.groupJid, jid: alvo.jid },
+          'falha inesperada ao processar alvo da remocao manual',
         );
-        detalhes.push({ ...alvo, resultado: 'SKIPPED', motivo: guarda.motivo });
-        pulados++;
-        continue;
+        await registrar(alvo.groupJid, alvo.jid, ModerationAction.FAILED, ModerationReason.MANUAL, String(err));
+        detalhes.push({ ...alvo, resultado: 'FAILED' });
+        falhas++;
       }
-
-      const resultado = await removerParticipante(alvo.groupJid, alvo.jid, 'MANUAL');
-      detalhes.push({ ...alvo, resultado });
-      if (resultado === 'REMOVED') removidos++;
-      else if (resultado === 'FAILED') falhas++;
-      else pulados++;
     }
 
     return { removidos, falhas, pulados, detalhes };
+  });
+
+  /**
+   * Historico de moderacao paginado, mais recente primeiro -- unica forma de
+   * auditar o que a protecao fez sem abrir o db:studio. Sem filtro nem busca
+   * de proposito: uma lista simples ja responde "o que essa ferramenta fez".
+   */
+  app.get<{ Querystring: { limit?: string; offset?: string } }>('/api/protecao/historico', async (req) => {
+    const { limit, offset } = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+        offset: z.coerce.number().int().min(0).optional(),
+      })
+      .parse(req.query);
+
+    const take = limit ?? 20;
+    const skip = offset ?? 0;
+
+    const [itens, total] = await Promise.all([
+      prisma.moderationLog.findMany({ orderBy: { occurredAt: 'desc' }, take, skip }),
+      prisma.moderationLog.count(),
+    ]);
+
+    const gruposEnvolvidos = await prisma.whatsappGroup.findMany({
+      where: { jid: { in: [...new Set(itens.map((i) => i.groupJid))] } },
+      select: { jid: true, name: true },
+    });
+    const nomePorJid = new Map(gruposEnvolvidos.map((g) => [g.jid, g.name]));
+
+    return {
+      total,
+      itens: itens.map((i) => ({
+        id: i.id,
+        groupJid: i.groupJid,
+        groupName: nomePorJid.get(i.groupJid) ?? null,
+        participant: i.participant,
+        action: i.action,
+        reason: i.reason,
+        detail: i.detail,
+        occurredAt: i.occurredAt,
+      })),
+    };
   });
 }

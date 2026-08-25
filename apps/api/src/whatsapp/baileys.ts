@@ -379,7 +379,8 @@ class WhatsAppService {
     if (!this.sock) throw new Error('WhatsApp desconectado. Conecte em Configurações › Canais.');
     const [resultado] = await this.sock.groupParticipantsUpdate(groupJid, [participantJid], 'remove');
     if (!resultado) {
-      // lib/Socket/groups.js:150-153: `getBinaryNodeChildren(node, 'participant')`
+      // src/Socket/groups.ts, groupParticipantsUpdate (por volta da linha 298
+      // na fonte TS do baileys): `getBinaryNodeChildren(node, 'participant')`
       // pode vir vazia mesmo com a remocao aceita -- resposta sem eco, nao
       // recusa. Erro proprio: quem chama trata isso como "provavelmente
       // saiu", nao como falha (ver RemocaoSemConfirmacaoError).

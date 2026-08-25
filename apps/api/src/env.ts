@@ -20,8 +20,10 @@ export const env = {
     /** Intervalo minimo entre remocoes. Remocao em rajada e padrao que o
      *  WhatsApp detecta -- o numero do usuario e o ganha-pao dele. */
     moderacaoIntervaloSegundos: Math.max(10, Number(process.env.WA_MODERACAO_INTERVALO_SEGUNDOS ?? 20)),
-    /** Teto diario de remocoes. Conservador de proposito. */
-    moderacaoTetoDiario: Number(process.env.WA_MODERACAO_TETO_DIARIO ?? 30),
+    /** Teto diario de remocoes. Conservador de proposito. Valor nao numerico
+     *  vira NaN sem o `|| 30`, e usados >= NaN e sempre falso -- o teto
+     *  desapareceria em silencio. */
+    moderacaoTetoDiario: Math.max(1, Number(process.env.WA_MODERACAO_TETO_DIARIO ?? 30) || 30),
   },
 };
 

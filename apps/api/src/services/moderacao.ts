@@ -23,6 +23,15 @@ import { decidir, normalizarNumero, type Decisao } from './protecao.js';
 
 type MotivoRemocao = Extract<Decisao, { remover: true }>['motivo'];
 
+// Mapa explicito em vez de ternario encadeado com else -- um motivo novo em
+// MotivoRemocao quebra a compilacao aqui (falta a chave) em vez de cair no
+// ultimo ramo do else e virar FOREIGN_DDI em silencio.
+const REASON_POR_MOTIVO = {
+  BLOCKLIST: ModerationReason.BLOCKLIST,
+  FOREIGN_DDI: ModerationReason.FOREIGN_DDI,
+  MANUAL: ModerationReason.MANUAL,
+} satisfies Record<MotivoRemocao | 'MANUAL', ModerationReason>;
+
 // O produto e brasileiro e o cartao "Filtro de DDI" na tela (ver spec da fase)
 // so tem liga-desliga -- nao existe campo pra digitar outro DDI. Por isso o
 // permitido fica fixo aqui, e nao numa chave de AppSetting que ninguem
@@ -149,13 +158,11 @@ export async function removerParticipante(
   // criterio) usa esse motivo pra nao inventar BLOCKLIST/FOREIGN_DDI onde
   // nao houve essa decisao automatica.
   motivo: MotivoRemocao | 'MANUAL',
-): Promise<'REMOVED' | 'FAILED' | 'SKIPPED'> {
-  const reason =
-    motivo === 'BLOCKLIST'
-      ? ModerationReason.BLOCKLIST
-      : motivo === 'MANUAL'
-        ? ModerationReason.MANUAL
-        : ModerationReason.FOREIGN_DDI;
+  // tetoDiario:true so quando o SKIPPED foi pelo teto diario -- quem chama
+  // (rota de remocao manual) usa isso pra dizer ao usuario quantas pessoas
+  // ficaram pra depois, em vez de um SKIPPED mudo igual aos outros.
+): Promise<{ resultado: 'REMOVED' | 'FAILED' | 'SKIPPED'; tetoDiario?: boolean }> {
+  const reason = REASON_POR_MOTIVO[motivo];
 
   return lock(async () => {
     const usados = await contadorHoje();
@@ -168,7 +175,7 @@ export async function removerParticipante(
         reason,
         `teto diario de ${env.wa.moderacaoTetoDiario} remocoes atingido`,
       );
-      return 'SKIPPED';
+      return { resultado: 'SKIPPED', tetoDiario: true };
     }
 
     await aguardarIntervalo();
@@ -184,12 +191,18 @@ export async function removerParticipante(
 
       if (err instanceof RemocaoSemConfirmacaoError) {
         // Resposta sem eco nao e recusa (ver removerDoGrupo) -- na duvida, o
-        // conservador e assumir que a remocao ocorreu: consome o teto do
-        // mesmo jeito que um sucesso confirmado, senao o contador fica
-        // sistematicamente atrasado em relacao ao que aconteceu de verdade.
-        await incrementarContadorHoje();
+        // conservador e assumir que a remocao ocorreu. registrar() ANTES do
+        // contador: a pessoa ja saiu do grupo nesse ponto, entao o log tem
+        // que existir mesmo que incrementarContadorHoje() falhe depois -- uma
+        // remocao irreversivel sem linha no log destroi a auditoria, e um
+        // contador subestimado so deixa o teto um pouco mais frouxo.
         await registrar(groupJid, jid, ModerationAction.REMOVED, reason, 'resposta sem confirmacao, assumido como removido');
-        return 'REMOVED';
+        try {
+          await incrementarContadorHoje();
+        } catch (erroContador) {
+          logger.error({ err: erroContador, groupJid, jid }, 'falha ao incrementar contador diario de remocoes');
+        }
+        return { resultado: 'REMOVED' };
       }
 
       // Nao ha laco de retry aqui: o participante segue no grupo ate a
@@ -197,13 +210,19 @@ export async function removerParticipante(
       // Guilhotina). Insistir numa remocao que o WhatsApp recusou e o
       // padrao que queima o numero do usuario.
       await registrar(groupJid, jid, ModerationAction.FAILED, reason, String(err));
-      return 'FAILED';
+      return { resultado: 'FAILED' };
     }
 
     ultimaRemocaoEm = Date.now();
-    await incrementarContadorHoje();
+    // Mesma ordem do ramo acima: registrar() antes do contador, porque a
+    // remocao ja aconteceu de verdade nesse ponto.
     await registrar(groupJid, jid, ModerationAction.REMOVED, reason, null);
-    return 'REMOVED';
+    try {
+      await incrementarContadorHoje();
+    } catch (erroContador) {
+      logger.error({ err: erroContador, groupJid, jid }, 'falha ao incrementar contador diario de remocoes');
+    }
+    return { resultado: 'REMOVED' };
   });
 }
 

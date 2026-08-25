@@ -14,6 +14,12 @@ export function MeusGrupos() {
 
   return (
     <>
+      <div className="head">
+        <div>
+          <h1>Meus Grupos</h1>
+        </div>
+      </div>
+
       <div className="tabs">
         {ABAS.map((a) => (
           <button key={a.id} className="tabs__item" data-on={aba === a.id} onClick={() => setAba(a.id)}>

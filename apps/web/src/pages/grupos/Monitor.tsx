@@ -36,7 +36,7 @@ export function Monitor() {
     <>
       <div className="head">
         <div>
-          <h1>Meus Grupos</h1>
+          <h2 style={{ margin: 0 }}>Monitor</h2>
           <p>Acompanhe a saúde dos seus grupos e o alcance de cada envio.</p>
         </div>
         <div className="field" style={{ width: 180 }}>
