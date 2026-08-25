@@ -81,4 +81,64 @@ assert.equal(
   'canonica limpa',
 );
 
+// lerPrecos com riscadoExtra (o caminho da Amazon). Precisa de DOM, entao
+// montamos o minimo que as funcoes tocam -- querySelectorAll, matches, closest,
+// cloneNode. Simular e o preco de nao ter jsdom como dependencia; o que
+// importa aqui e a REGRA (o "de" so vale se for maior), nao o parser de CSS.
+function elFalso({ classe = '', texto: t = '', pai = null }) {
+  const el = {
+    _classe: classe,
+    textContent: t,
+    parentElement: pai,
+    getAttribute: (n) => (n === 'class' ? classe : null),
+    matches: (sel) => sel.split(',').some((s) => {
+      const c = s.trim().replace(/^\./, '');
+      return s.trim().startsWith('.') && classe.split(/\s+/).includes(c);
+    }),
+    closest: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  return el;
+}
+function raizFalsa(filhos) {
+  return {
+    textContent: filhos.map((f) => f.textContent).join(' '),
+    querySelectorAll: () => filhos,
+    cloneNode: () => ({ querySelectorAll: () => [], textContent: filhos.map((f) => f.textContent).join(' ') }),
+  };
+}
+const OPCOES_AZ = {
+  blocos: '.a-price',
+  lerBloco: (el) => (el ? H.parsePrecoBR(el.textContent) : undefined),
+  riscadoExtra: '.a-text-price',
+};
+
+// Caso Amazon real (medido 25/08/2026): "de" R$369,00 vem como .a-text-price.
+const comDe = raizFalsa([
+  elFalso({ classe: 'a-price', texto: 'R$ 186,77' }),
+  elFalso({ classe: 'a-price a-text-price', texto: 'R$ 369,00' }),
+]);
+assert.deepEqual(H.lerPrecos(comDe, OPCOES_AZ), { price: 186.77, listPrice: 369 }, 'de maior vira listPrice');
+
+// O caso perigoso: .a-text-price carregando preco POR UNIDADE (R$ 1,09 de um
+// produto de R$ 174,90). Tem que ser DESCARTADO, nunca trocado -- e a troca
+// que na concorrente publicou um perfume de R$ 243 por R$ 2,31.
+const porUnidade = raizFalsa([
+  elFalso({ classe: 'a-price', texto: 'R$ 174,90' }),
+  elFalso({ classe: 'a-price a-text-price', texto: 'R$ 1,09' }),
+]);
+assert.deepEqual(
+  H.lerPrecos(porUnidade, OPCOES_AZ),
+  { price: 174.9, listPrice: undefined },
+  'preco por unidade e descartado, nunca trocado',
+);
+
+// "de" igual ao atual nao e desconto de 0%, e ausencia de desconto.
+const mesmoValor = raizFalsa([
+  elFalso({ classe: 'a-price', texto: 'R$ 99,00' }),
+  elFalso({ classe: 'a-price a-text-price', texto: 'R$ 99,00' }),
+]);
+assert.equal(H.lerPrecos(mesmoValor, OPCOES_AZ).listPrice, undefined, 'de igual ao atual nao conta');
+
 console.log('shared.check: ok');

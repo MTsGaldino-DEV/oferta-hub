@@ -53,10 +53,8 @@
   if (!/(^|\.)amazon\.com(\.br)?$/i.test(window.location.hostname)) return;
 
   /**
-   * Ruido de preco da Amazon. `.a-text-price` NAO entra aqui: na pagina de
-   * produto ele e o riscado (que a gente quer, como listPrice), e no card de
-   * busca ele e o preco por unidade -- que o guarda de preco-por-unidade do
-   * shared.js ja derruba pelo texto ao redor.
+   * Ruido de preco da Amazon. `.a-text-price` NAO entra aqui -- ele e tratado
+   * como candidato a preco "de" (ver RISCADO_AMAZON logo abaixo).
    */
   const RUIDO_AMAZON = [
     '#sp-cc',
@@ -68,6 +66,25 @@
 
   /** Blocos que a Amazon usa pra preco, nas duas telas. */
   const BLOCOS_AMAZON = '.a-price, .a-text-strike, .apex-basisprice-value';
+
+  /**
+   * Classes que carregam o preco "de" na Amazon alem do `.a-text-strike` que o
+   * shared.js ja conhece.
+   *
+   * Medido ao vivo na busca em 25/08/2026: o card alterna de markup enquanto
+   * hidrata, e num dos estados o "de" sai como `.a-price.a-text-price`, sem
+   * classe de riscado e sem `line-through` computado. Sem esta linha, 60 de 60
+   * cards da busca saiam sem desconto -- com o "de" visivel na tela.
+   *
+   * `.apex-basisprice-value` e o equivalente na pagina de produto.
+   *
+   * A trava que torna isso seguro (e que a concorrente nao tinha) esta no
+   * lerPrecos: `listPrice` so vale se for MAIOR que `price`, e nunca ha troca
+   * entre os dois. Se `.a-text-price` vier com preco por unidade de medida --
+   * o caso que na concorrente publicou um perfume de R$ 243 por R$ 2,31 --,
+   * ele e menor que o atual e se descarta sozinho.
+   */
+  const RISCADO_AMAZON = '.a-text-price, .apex-basisprice-value';
 
   const JUNK = [
     'header', 'footer', '#nav-main', '#navbar-main', '#rhf-container',
@@ -116,6 +133,7 @@
     seletoresRuido: RUIDO_AMAZON,
     blocos: BLOCOS_AMAZON,
     lerBloco: lerBlocoAmazon,
+    riscadoExtra: RISCADO_AMAZON,
   };
 
   function capturarProduto() {

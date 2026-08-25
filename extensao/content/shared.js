@@ -100,8 +100,34 @@
     return false;
   }
 
-  const ehRiscado = (el) =>
-    el.matches('s, del, .andes-money-amount--previous, .a-text-strike') || !!el.closest('s, del');
+  /**
+   * O bloco e o preco "de" (cheio), nao o atual.
+   *
+   * `riscadoExtra` deixa a loja somar uma classe que ela usa pro "de" mas que
+   * NAO e semanticamente riscada. A Amazon precisa disso: medido ao vivo na
+   * busca em 25/08/2026, o MESMO card alterna entre dois estados enquanto
+   * hidrata --
+   *
+   *   estado A: `.a-price.a-text-price`                    R$ 369,00
+   *   estado B: `.a-size-small a-color-secondary a-text-strike`  R$ 369,00
+   *
+   * -- e no estado A nem a classe `.a-text-strike` existe nem o
+   * `text-decoration` computado e `line-through`, entao nem o seletor nem o
+   * `riscadoPorEstilo` alcancam. Sem `riscadoExtra`, 60 de 60 cards da busca
+   * sairam sem desconto nenhum, com o "de" na tela.
+   *
+   * Por que aceitar `.a-text-price` e seguro AQUI, sendo que na concorrente
+   * essa mesma classe carregava o preco por UNIDADE de medida (o caso que
+   * publicou um perfume de R$ 243 por R$ 2,31): o estrago la vinha da TROCA
+   * que eles faziam quando o "de" saia menor que o atual. Aqui nao existe
+   * troca -- `listPrice` so sobrevive se for MAIOR que `price` (ver o fim de
+   * lerPrecos). Preco por unidade e sempre menor, entao ele se descarta
+   * sozinho; preco cheio e sempre maior, e passa.
+   */
+  const ehRiscado = (el, riscadoExtra) =>
+    el.matches('s, del, .andes-money-amount--previous, .a-text-strike') ||
+    !!el.closest('s, del') ||
+    !!(riscadoExtra && el.matches(riscadoExtra));
 
   /**
    * Acha o preco riscado pelo ESTILO em vez da classe. Ultimo recurso, quando
@@ -149,7 +175,12 @@
    */
   function lerPrecos(raiz, opcoes = {}) {
     if (!raiz) return {};
-    const { seletoresRuido = '', blocos = '.andes-money-amount', lerBloco = lerDinheiro } = opcoes;
+    const {
+      seletoresRuido = '',
+      blocos = '.andes-money-amount',
+      lerBloco = lerDinheiro,
+      riscadoExtra = '',
+    } = opcoes;
 
     let price;
     let listPrice;
@@ -161,8 +192,8 @@
           !pareceParcela(el) &&
           !ehPrecoPorUnidade(el),
       );
-      price = lerBloco(candidatos.find((el) => !ehRiscado(el)));
-      listPrice = lerBloco(candidatos.find(ehRiscado));
+      price = lerBloco(candidatos.find((el) => !ehRiscado(el, riscadoExtra)));
+      listPrice = lerBloco(candidatos.find((el) => ehRiscado(el, riscadoExtra)));
     }
 
     if (!price) {
