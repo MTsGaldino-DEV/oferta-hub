@@ -14,7 +14,7 @@
   "content_scripts": [
     {
       "matches": ["https://*.mercadolivre.com.br/*", "https://*.mercadolibre.com/*"],
-      "js": ["content/ml.js"],
+      "js": ["content/shared.js", "content/ml.js"],
       "css": ["content/ml.css"],
       "run_at": "document_idle"
     }
