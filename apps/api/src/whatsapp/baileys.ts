@@ -5,6 +5,7 @@ import makeWASocket, {
   prepareWAMessageMedia,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  type GroupMetadata,
   type WASocket,
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
@@ -12,6 +13,18 @@ import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
 import { createMutex } from '../lib/mutex.js';
+import { avaliarEntrada } from '../services/moderacao.js';
+
+/**
+ * Baileys entrega o jid da propria conta com sufixo de dispositivo
+ * (numero:12@dominio); participantes de grupo (meta.participants) chegam sem
+ * ele. Sem cortar, a comparacao nunca bate -- usado tanto pro botIsAdmin do
+ * sync quanto pela moderacao pra reconhecer a propria conta.
+ */
+export function semSufixoDispositivo(jid: string): string {
+  const [usuario, dominio] = jid.split('@');
+  return `${usuario.split(':')[0]}@${dominio}`;
+}
 
 /**
  * Sobe a foto do produto pros servidores do WhatsApp e devolve os campos de
@@ -181,6 +194,12 @@ class WhatsAppService {
             data: { memberCount: { increment: delta } },
           }),
         ]);
+
+        if (action === 'add') {
+          // Depois de registrar o evento, nunca antes: moderacao que falha nao
+          // pode custar o historico de entrada/saida nem o envio de oferta.
+          await avaliarEntrada(groupJid, participants);
+        }
       } catch (err) {
         logger.error({ err: String(err) }, 'falha ao registrar entrada/saida de grupo');
       }
@@ -238,15 +257,59 @@ class WhatsAppService {
   async syncGroups() {
     if (!this.sock) return;
     const groups = await this.sock.groupFetchAllParticipating();
+    const eu = this.sock.user?.id ? semSufixoDispositivo(this.sock.user.id) : null;
+
+    // Quanto o Filtro de DDI enxerga na pratica: participante em LID nao
+    // carrega numero, entao nao ha DDI pra comparar. Medicao pendente desde a
+    // Task 1 -- so dava pra fazer aqui, com a conexao que ja esta aberta.
+    let comNumeroVisivel = 0;
+    let comLid = 0;
+
     for (const [jid, meta] of Object.entries(groups)) {
       const memberCount = meta.participants.length;
+      const botIsAdmin = meta.participants.some(
+        (p) => p.id === eu && (p.admin === 'admin' || p.admin === 'superadmin'),
+      );
+      for (const p of meta.participants) {
+        if (p.id.endsWith('@s.whatsapp.net')) comNumeroVisivel++;
+        else if (p.id.endsWith('@lid')) comLid++;
+      }
       await prisma.whatsappGroup.upsert({
         where: { jid },
-        create: { jid, name: meta.subject, memberCount },
-        update: { name: meta.subject, memberCount },
+        create: { jid, name: meta.subject, memberCount, botIsAdmin },
+        update: { name: meta.subject, memberCount, botIsAdmin },
       });
     }
+    logger.info({ comNumeroVisivel, comLid }, 'participantes com numero visivel vs LID');
     logger.info({ count: Object.keys(groups).length }, 'grupos sincronizados');
+  }
+
+  /**
+   * Remove um participante do grupo. Exige que o numero conectado seja admin.
+   *
+   * A chamada do Baileys RESOLVE mesmo quando o WhatsApp recusa a remocao
+   * (ex: o bot deixou de ser admin) -- o resultado vem no status por
+   * participante (lib/Socket/groups.js: `status: p.attrs.error || '200'`),
+   * nao por excecao. So um erro de rede/IQ derruba a promise. Sem checar o
+   * status aqui, uma remocao recusada seria registrada como sucesso.
+   */
+  async removerDoGrupo(groupJid: string, participantJid: string): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp desconectado. Conecte em Configurações › Canais.');
+    const [resultado] = await this.sock.groupParticipantsUpdate(groupJid, [participantJid], 'remove');
+    if (resultado?.status !== '200') {
+      throw new Error(`WhatsApp recusou a remocao (status ${resultado?.status ?? 'desconhecido'})`);
+    }
+  }
+
+  /**
+   * Metadados atuais do grupo (quem e admin agora), direto do WhatsApp -- a
+   * tabela local so guarda agregados (memberCount, botIsAdmin do proprio
+   * numero), nao a lista de admins de cada participante. Usado pela
+   * moderacao pra decidir quem pode ser removido.
+   */
+  async groupMetadata(groupJid: string): Promise<GroupMetadata | null> {
+    if (!this.sock) return null;
+    return this.sock.groupMetadata(groupJid);
   }
 
   private async checkQuota() {
