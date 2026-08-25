@@ -21,8 +21,9 @@ type MotivoNaoRemovido = Extract<Decisao, { remover: false }>['motivo'];
 // O produto e brasileiro e o cartao "Filtro de DDI" na tela (ver spec da fase)
 // so tem liga-desliga -- nao existe campo pra digitar outro DDI. Por isso o
 // permitido fica fixo aqui, e nao numa chave de AppSetting que ninguem
-// preenche.
-const DDI_PERMITIDO = '55';
+// preenche. Exportado: a rota de escanear (protecao.ts) precisa do mesmo
+// valor pra nao duplicar o "55" como uma segunda fonte da verdade.
+export const DDI_PERMITIDO = '55';
 
 const CHAVE_ESCUDO = 'protecao_escudo';
 const CHAVE_DDI = 'protecao_ddi';
@@ -129,9 +130,18 @@ const lock = createMutex();
 export async function removerParticipante(
   groupJid: string,
   jid: string,
-  motivo: MotivoRemocao,
+  // 'MANUAL' alem dos dois motivos que decidir() produz: a rota de remocao
+  // explicita (usuario marcou a lista na tela, nao um escaneamento por
+  // criterio) usa esse motivo pra nao inventar BLOCKLIST/FOREIGN_DDI onde
+  // nao houve essa decisao automatica.
+  motivo: MotivoRemocao | 'MANUAL',
 ): Promise<'REMOVED' | 'FAILED' | 'SKIPPED'> {
-  const reason = motivo === 'BLOCKLIST' ? ModerationReason.BLOCKLIST : ModerationReason.FOREIGN_DDI;
+  const reason =
+    motivo === 'BLOCKLIST'
+      ? ModerationReason.BLOCKLIST
+      : motivo === 'MANUAL'
+        ? ModerationReason.MANUAL
+        : ModerationReason.FOREIGN_DDI;
 
   return lock(async () => {
     const usados = await contadorHoje();

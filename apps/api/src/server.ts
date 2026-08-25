@@ -15,6 +15,7 @@ import { garimparRoutes } from './routes/garimpar.js';
 import { groupRoutes } from './routes/groups.js';
 import { nichoRoutes } from './routes/nichos.js';
 import { offerRoutes } from './routes/offers.js';
+import { protecaoRoutes } from './routes/protecao.js';
 import { redirectRoutes } from './routes/redirect.js';
 import { statsRoutes } from './routes/stats.js';
 import { templateRoutes } from './routes/templates.js';
@@ -84,6 +85,7 @@ await app.register(async (instance) => {
   await instance.register(groupRoutes);
   await instance.register(nichoRoutes);
   await instance.register(offerRoutes);
+  await instance.register(protecaoRoutes);
   await instance.register(statsRoutes);
   await instance.register(templateRoutes);
   await instance.register(watchRoutes);
