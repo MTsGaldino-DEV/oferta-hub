@@ -57,4 +57,28 @@ let leituras = 0;
 for (let i = 0; i < 20; i++) H.registrar(acc2, 'MLB2', () => { leituras++; return { url: 'u' }; });
 assert.equal(leituras, 6, 'para em MAX_RELEITURAS');
 
+// amazon.js publica os helpers puros ANTES do guard de hostname, justamente
+// pra este check alcancar as funcoes sem executar o resto do content script
+// (que toca chrome.*, MutationObserver e DOM real, nenhum deles existe aqui).
+// Por isso o hostname falso e de outra loja: o guard entao retorna cedo.
+const codigoAmazon = readFileSync(join(aqui, 'amazon.js'), 'utf8');
+const janelaAmazon = { __HUB: H, location: { hostname: 'exemplo.invalido' } };
+new Function('window', 'document', codigoAmazon)(janelaAmazon, {});
+const AZ = janelaAmazon.__HUB_AMAZON;
+
+assert.equal(AZ.extrairAsin('https://www.amazon.com.br/dp/B08N5WRWNW'), 'B08N5WRWNW', 'forma /dp/');
+assert.equal(AZ.extrairAsin('https://www.amazon.com.br/gp/product/B08N5WRWNW/ref=x'), 'B08N5WRWNW', 'forma /gp/product/');
+assert.equal(AZ.extrairAsin('https://www.amazon.com.br/Nome-Do-Produto/dp/B08N5WRWNW?th=1'), 'B08N5WRWNW', 'com slug e query');
+assert.equal(AZ.extrairAsin('https://www.amazon.com.br/s?k=furadeira'), null, 'pagina de busca nao e produto');
+assert.equal(AZ.extrairAsin('https://www.mercadolivre.com.br/p/MLB123456'), null, 'outra loja');
+
+// canonica: sai limpa, sem query nem slug -- o que a gente guarda e o que
+// vira link de afiliado depois, e parametro de tracking da busca nao pode ir
+// junto.
+assert.equal(
+  AZ.canonicaDe('https://www.amazon.com.br/Nome/dp/B08N5WRWNW?ref=sr_1_3'),
+  'https://www.amazon.com.br/dp/B08N5WRWNW',
+  'canonica limpa',
+);
+
 console.log('shared.check: ok');

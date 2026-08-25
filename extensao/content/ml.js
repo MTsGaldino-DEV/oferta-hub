@@ -25,6 +25,16 @@
   const H = window.__HUB;
   if (!H) return; // shared.js nao carregou -- sem ele nada aqui funciona
 
+  // Este arquivo carrega em todos os dominios do manifest (evita manter um
+  // bloco de content_scripts por loja); daqui pra baixo so roda no ML.
+  //
+  // O guard nao e so economia: sem ele, o listener de 'raspar' la embaixo
+  // tambem se registra na Amazon, e como ml.js vem antes no manifest ele
+  // responde PRIMEIRO -- com lista vazia, porque nenhum seletor do ML casa.
+  // O `responder()` que vale e o primeiro; a resposta de verdade do amazon.js
+  // seria descartada, e o painel mostraria "nenhum produto" numa pagina cheia.
+  if (!/(^|\.)mercadoli(vre|bre)\.com(\.br)?$/i.test(window.location.hostname)) return;
+
   const { texto, lerVendidos, extrairMelhorImagem, registrar } = H;
 
   /**
