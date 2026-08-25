@@ -10,7 +10,8 @@ a GarimpaLinks Connect, extensão concorrente que cobre ML, Amazon, Shopee e
 Magalu, tem um widget flutuante bem mais trabalhado on-page, e tem uma
 extração de card sensivelmente mais robusta (recuperação de campo incompleto
 por retry, escolha de melhor imagem, tratamento de preço por papel em vez de
-por classe/tamanho).
+por classe/tamanho). Nosso escopo cobre ML, Amazon e Magalu — Shopee fica de
+fora por enquanto (ver abaixo).
 
 Levantamento no backend (`apps/api`) mudou o escopo do que precisa ser
 construído: `ingestProduct()` (`src/services/ingest.ts:143`) já monta o link
@@ -26,26 +27,28 @@ pronto:
   obrigatória pro ML, isso não muda).
 - Magalu não existe: nem `Platform.MAGALU` no enum, nem `connectors/magalu.ts`.
 
-Consequência: para Amazon e Shopee a extensão **não precisa mintar nada
+Consequência: para Amazon a extensão **não precisa mintar nada
 client-side** — só captura e manda os dados brutos; o servidor gera o link de
-afiliado sozinho, contanto que a credencial (`partnerTag` / API key) esteja
-configurada no admin. Hoje elas **não estão** configuradas — isso é tarefa do
-usuário no painel, fora do escopo desta implementação.
+afiliado sozinho, contanto que a credencial (`partnerTag`) esteja configurada
+no admin. Hoje ela **não está** configurada — isso é tarefa do usuário no
+painel, fora do escopo desta implementação.
 
-**Risco conhecido, não resolvido por esta spec:** a concorrente mediu, em
-produção, que a extração por DOM da Shopee é sensivelmente pior que a leitura
-feita pelo próprio servidor deles a partir da URL (imagem: 48,5% vs 100%;
-título sujo: 71,7% vs 0%) — por isso ela nunca manda Shopee direto, só copia
-link. Nós não temos um "buscar pela URL" server-side pra Shopee além do
-`generateShortLink` (que só gera o link, não busca metadado de produto). As
-melhorias de `shared.js` (melhor imagem, retry-até-completar) devem reduzir
-esse gap, mas não necessariamente fecham — a verificação manual da Fase 1
-inclui checar a qualidade real dos dados de Shopee antes de considerar essa
-loja pronta pra uso sério.
+**Shopee fica de fora desta spec.** Já existe captura automática via API
+oficial (`connectors/shopee.ts` + `shopee-feed.ts`, usada pelo garimpo
+automático). Adicionar captura por DOM na extensão traria o mesmo problema
+que a própria concorrente documentou e por isso nunca manda Shopee direto:
+extração por DOM sensivelmente pior que leitura server-side a partir da URL
+(imagem: 48,5% vs 100%; título sujo: 71,7% vs 0%, medido por ela em produção).
+Sem uma rota server-side de "buscar metadado pela URL" pra Shopee (o
+`generateShortLink` só gera link, não busca produto), o esforço de portar a
+extração pra essa loja não teria contrapartida clara enquanto o caminho de
+API já resolve. Fica de fora "por enquanto" — revisitar se a API de garimpo
+automático não cobrir um caso que o usuário precise capturar manualmente.
 
 ## Decisões do usuário
 
-- Expandir para Amazon, Shopee e Magalu, além de Mercado Livre.
+- Expandir para Amazon e Magalu, além de Mercado Livre. Shopee fica de fora
+  por enquanto (já tem captura automática via API — ver Contexto).
 - **Manter a revisão manual com checkbox no side panel** para todas as lojas —
   não adotar o modelo de envio direto da concorrente. Só a etapa de
   *captura/trigger* on-page muda de aparência; enviar continua sendo uma ação
@@ -53,11 +56,11 @@ loja pronta pra uso sério.
 - Estrutura de código: **Abordagem B** — um módulo de helpers compartilhado
   (`content/shared.js`) com a lógica boa (preço por papel, melhor imagem,
   retry-até-completar, autoscroll) + um arquivo por loja
-  (`content/{ml,amazon,shopee,magalu}.js`) só com os seletores e o que é
-  específico daquela loja. Evita duplicar a lógica de preço/imagem quatro
-  vezes (o que aconteceria copiando o arquivo único da concorrente).
-- Ordem de entrega: **Fase 1** = Mercado Livre (refatorado) + Amazon + Shopee
-  — infraestrutura de link de afiliado já existe nas três. **Fase 2** =
+  (`content/{ml,amazon,magalu}.js`) só com os seletores e o que é
+  específico daquela loja. Evita duplicar a lógica de preço/imagem entre
+  lojas (o que aconteceria copiando o arquivo único da concorrente).
+- Ordem de entrega: **Fase 1** = Mercado Livre (refatorado) + Amazon —
+  infraestrutura de link de afiliado já existe nas duas. **Fase 2** =
   Magalu — precisa de migration + conector novos.
 - Paleta da extensão continua clara/amarela, nunca a dark+dourado da
   concorrente — mesma decisão já tomada para `apps/web`
@@ -68,16 +71,17 @@ loja pronta pra uso sério.
 
 ### `content/shared.js` — o que sai da extração de cada loja
 
-Funções puras e utilitários de DOM reaproveitados pelas 4 lojas:
+Funções puras e utilitários de DOM reaproveitados pelas lojas suportadas:
 
 - **`lerPrecos(raiz)`** — separa preço atual do preço "de" por **papel**, não
   por tamanho do número: ignora parcela (`RUIDO_DE_PRECO` + heurística "começa
   com `Nx`"), ignora preço por unidade de medida (regra nova, vinda do bug
   documentado da concorrente: `R$ 243 / 105ml` não pode virar "preço R$ 2,31").
-  Riscado é lido por classe conhecida quando existe; sem classe estável (caso
-  Shopee), cai no fallback por `getComputedStyle().textDecorationLine ===
-  'line-through'`, escopado a poucos elementos com "R$" no texto pra não pagar
-  o custo em todo o card.
+  Riscado é lido por classe conhecida quando existe; sem classe estável, cai
+  no fallback por `getComputedStyle().textDecorationLine === 'line-through'`
+  (técnica documentada pela concorrente pro caso da Shopee, mas genérica —
+  serve pra qualquer loja futura sem classe estável), escopado a poucos
+  elementos com "R$" no texto pra não pagar o custo em todo o card.
 - **`extrairMelhorImagem(cardEl)`** — não pega a primeira `<img>`: prioriza
   quem veio de `data-src` (lazy-load real, banner carregado não é lazy);
   empate, fica com a de maior área renderizada. Normaliza foto da Amazon pro
@@ -88,7 +92,7 @@ Funções puras e utilitários de DOM reaproveitados pelas 4 lojas:
   congelar**: cada nova leitura do mesmo card preenche só o que falta, sem
   sobrescrever campo que já veio bom. Teto de releituras por id (mesmo
   `MAX_RELEITURAS = 6` já usado no hub) pra não custar infinito em card que
-  nunca completa (ex.: Shopee, que não carrega preço/imagem em alguns casos).
+  nunca completa (hidratação lenta, campo que nunca chega a carregar).
 - **`rolarAcumulando(alvo, extrairDaPagina, opções)`** — autoscroll genérico:
   rola, chama o extrator específico da loja a cada N frames, para no fundo da
   página ou depois de M passos sem novo produto. Generaliza o que já existe
@@ -98,7 +102,7 @@ Funções puras e utilitários de DOM reaproveitados pelas 4 lojas:
   `MutationObserver` no body + no `documentElement`, reataching o mesmo
   elemento (preserva estado) em vez de recriar.
 - **`montarWidget(config)`** — widget Shadow DOM (`mode: "closed"`)
-  compartilhado por todas as lojas: badge da loja detectada (favicon da
+  compartilhado por todas as lojas suportadas: badge da loja detectada (favicon da
   própria página), botão "Capturar", contador durante o scroll, e mensagem
   final ("N produtos prontos — abra o painel lateral"). **Não envia nada
   sozinho** — só chama `chrome.storage.local.set({ captura_pendente })`,
@@ -106,7 +110,7 @@ Funções puras e utilitários de DOM reaproveitados pelas 4 lojas:
   que já existem pro app (`--brand` amarelo, `--ink`, `--muted`) — não os
   tokens dark/dourado da concorrente.
 
-### `content/{ml,amazon,shopee}.js` (Fase 1) — o que muda por loja
+### `content/{ml,amazon}.js` (Fase 1) — o que muda por loja
 
 Cada arquivo só declara:
 
@@ -114,8 +118,7 @@ Cada arquivo só declara:
   footer, recomendados, patrocinado) — mesmo papel do `JUNK`/`CARD_SELECTORS`
   da concorrente, mas por arquivo em vez de mapa central.
 - `extrairId(href)` — regex específico da loja (ML já existe em
-  `resolverUrlMl`; Amazon usa `/dp/` ou `/gp/product/`; Shopee usa
-  `-i\.(\d+)\.(\d+)` ou `/product/(\d+)/(\d+)`).
+  `resolverUrlMl`; Amazon usa `/dp/` ou `/gp/product/`).
 - `extrairTitulo(cardEl)` quando a heurística padrão (heading/aria-label) não
   bastar — só a Amazon precisa da heurística extra (título no `alt` da
   imagem, ver comentário original sobre os dois layouts da Amazon).
@@ -126,7 +129,7 @@ scan do hub continuam como estão (já funcionam e têm hardening específico
 documentado), só passam a usar `lerPrecos`/`extrairMelhorImagem`/`registrar`
 de `shared.js` em vez da versão local duplicada.
 
-Amazon e Shopee **não têm mint client-side** — o arquivo captura, empacota
+Amazon **não tem mint client-side** — o arquivo captura, empacota
 `{ platform, externalId, title, canonicalUrl, imageUrl, price, listPrice }` e
 manda direto pro service worker existente (`tipo: 'capturar'`), que já chama
 `/api/extensao/produtos` sem `affiliateUrl`; o conector do servidor gera o
@@ -134,24 +137,24 @@ link sozinho.
 
 ### `manifest.json`
 
-- `host_permissions`: soma `*://*.amazon.com.br/*`, `*://*.shopee.com.br/*`
-  (Fase 2 soma Magalu).
+- `host_permissions`: soma `*://*.amazon.com.br/*` na Fase 1 (Fase 2 soma
+  Magalu). Shopee não entra — sem content script pra essa loja.
 - `content_scripts`: um único bloco cobrindo os hosts das lojas ativas na
-  fase, `js: ["content/shared.js", "content/ml.js", "content/amazon.js",
-  "content/shopee.js"]`. Cada arquivo se auto-guarda checando se a própria
-  loja foi detectada (mesmo padrão da concorrente) — carregar os 4 em todo
-  domínio é barato (arquivos pequenos, sem rede) e evita manter 4 blocos de
-  manifest sincronizados.
+  fase, `js: ["content/shared.js", "content/ml.js", "content/amazon.js"]`.
+  Cada arquivo se auto-guarda checando se a própria loja foi detectada
+  (mesmo padrão da concorrente) — carregar os dois em todo domínio é barato
+  (arquivos pequenos, sem rede) e evita manter blocos de manifest
+  sincronizados por loja.
 
 ### `ui/panel.js` e `ui/panel.html` — generalizar pra multi-loja
 
-- `ehPaginaMl(url)` vira `ehPaginaSuportada(url)`, testando os hosts das 4
-  lojas.
+- `ehPaginaMl(url)` vira `ehPaginaSuportada(url)`, testando os hosts das
+  lojas suportadas na fase (ML + Amazon; depois + Magalu).
 - Card de item na lista ganha um selo pequeno com o nome da loja
   (`produto.platform`), porque a lista pode ter itens de origens diferentes
   se o usuário navegar entre abas antes de enviar.
 - Mensagem de "fora da loja" fica genérica ("Abra uma página de Mercado
-  Livre, Amazon, Shopee ou Magalu nesta aba").
+  Livre ou Amazon nesta aba" — soma "ou Magalu" na Fase 2).
 - Resto do fluxo (checkbox, marcar todos, enviar, logs) não muda — já é
   agnóstico de loja porque só lê `produto.*`.
 
@@ -172,7 +175,7 @@ link sozinho.
 
 - `apps/web` não é tocado por esta spec.
 - Fluxo de revisão manual (checkbox → "Enviar ao Hub") continua igual, agora
-  pras 4 lojas.
+  pras lojas suportadas (ML, Amazon, depois Magalu).
 - Mint client-side do ML (`service-worker.js`, `gerarLinkNaPagina`) não muda —
   já funciona e é a única loja que exige sessão do navegador.
 - Paleta clara/amarela da extensão; não se copia o tema dark/dourado da
@@ -182,11 +185,11 @@ link sozinho.
 
 ## Erros e casos de borda
 
-- Amazon/Shopee sem credencial configurada no admin: `buildAffiliateLink`
-  lança, o item cai em `falhas` na resposta de `/api/extensao/produtos`
-  (comportamento já existente, por item — não derruba o lote). O side panel
-  mostra quantos falharam; a mensagem de erro chega ao console (mesmo padrão
-  de `avisoLink` hoje).
+- Amazon sem credencial configurada no admin: `buildAffiliateLink` lança, o
+  item cai em `falhas` na resposta de `/api/extensao/produtos` (comportamento
+  já existente, por item — não derruba o lote). O side panel mostra quantos
+  falharam; a mensagem de erro chega ao console (mesmo padrão de `avisoLink`
+  hoje).
 - Card sem preço nem imagem depois de `MAX_RELEITURAS` tentativas: entra
   mesmo assim com os campos que tiver — front do painel já trata campo
   ausente (não mostra o `<span>` de preço se não tiver).
@@ -197,8 +200,8 @@ link sozinho.
   mensagem já tratada em `ml.js` hoje, generalizada pro shared.
 - Loja sem produto na página (ex.: home, carrinho): widget mostra "nenhum
   produto encontrado", nada é guardado.
-- Página de loja sem loja suportada nos 4 domínios: content script nem monta
-  (guard de `detect()` em cada arquivo).
+- Página fora dos domínios suportados: content script nem monta (guard de
+  `detect()` em cada arquivo).
 
 ## Testes
 
@@ -211,7 +214,7 @@ link sozinho.
   milhar, parcela descartada, preço-por-unidade descartado, riscado menor
   que atual descartado, escolha de imagem por prioridade `data-src` e por
   maior área.
-- Verificação manual por loja (Fase 1: ML, Amazon, Shopee): abrir uma busca
+- Verificação manual por loja (Fase 1: ML, Amazon): abrir uma busca
   e uma página de produto de cada, clicar capturar, conferir no side panel
   que título/preço/imagem vieram certos e que o envio cria oferta na fila
   (ou cai em `falhas` de forma legível, se a credencial ainda não estiver
