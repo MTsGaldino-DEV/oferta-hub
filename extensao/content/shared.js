@@ -393,9 +393,100 @@
     return [...acc.produtos.values()];
   }
 
+  const ID_HOST = 'hubofertas-widget';
+
+  /**
+   * Widget flutuante da captura. Shadow DOM fechado: a pagina da loja tem
+   * regras agressivas em `button` e `div`, e o inverso tambem vale -- nosso
+   * estilo nao pode vazar pra vitrine do cliente.
+   *
+   * NAO envia nada ao Hub. Captura, guarda em captura_pendente, e manda o
+   * usuario pro painel lateral -- e la, com checkbox por item, que o envio de
+   * verdade acontece. Mesma regra que os botoes do hub ja seguiam.
+   */
+  function montarWidget({ loja, rotulo, aoCapturar }) {
+    if (document.getElementById(ID_HOST)) return;
+
+    const host = document.createElement('div');
+    host.id = ID_HOST;
+    document.body.appendChild(host);
+    manterMontado(host);
+    const raiz = host.attachShadow({ mode: 'closed' });
+
+    // Favicon da propria loja: e sempre a logo certa, sem a gente empacotar
+    // um icone por marketplace.
+    const favHref = document.querySelector('link[rel~="icon"]')?.getAttribute('href') || '/favicon.ico';
+    const favUrl = new URL(favHref, location.origin).href;
+
+    raiz.innerHTML = `
+      <style>
+        :host{all:initial}
+        *{box-sizing:border-box;font:500 13px/1.4 system-ui,sans-serif}
+        .caixa{position:fixed;right:20px;bottom:20px;z-index:2147483000;width:236px;
+          background:#16171a;color:#fff;border:2px solid #ffe01b;border-radius:8px;
+          box-shadow:0 4px 16px rgba(0,0,0,.28);overflow:hidden}
+        .topo{display:flex;align-items:center;gap:8px;padding:10px 12px;
+          border-bottom:1px solid rgba(255,255,255,.1)}
+        .fav{width:16px;height:16px;border-radius:3px;background:#fff;object-fit:contain}
+        .loja{font-weight:600;color:#ffe01b}
+        .corpo{padding:12px}
+        .btn{width:100%;padding:10px 14px;border:2px solid #ffe01b;border-radius:6px;
+          background:#16171a;color:#ffe01b;font:600 14px/1.2 system-ui,sans-serif;cursor:pointer}
+        .btn:hover:not(:disabled){background:#23252a}
+        .btn:disabled{opacity:.6;cursor:wait}
+        .msg{margin-top:10px;font-size:12px;line-height:1.45;color:#d8d8d8}
+        .msg[data-tom="erro"]{color:#ff8b7a}
+        .msg[data-tom="ok"]{color:#8ce39a}
+        .msg:empty{display:none}
+      </style>
+      <div class="caixa">
+        <div class="topo">
+          <img class="fav" id="fav" src="${favUrl}" alt="" />
+          <span class="loja">${loja}</span>
+        </div>
+        <div class="corpo">
+          <button class="btn" id="capturar">${rotulo}</button>
+          <p class="msg" id="msg"></p>
+        </div>
+      </div>`;
+
+    const botao = raiz.getElementById('capturar');
+    const msg = raiz.getElementById('msg');
+    // Favicon que nao carrega deixaria um icone quebrado ao lado do nome.
+    raiz.getElementById('fav').addEventListener('error', (e) => e.target.remove());
+
+    const dizer = (texto, tom) => { msg.textContent = texto; msg.dataset.tom = tom || ''; };
+
+    botao.addEventListener('click', async () => {
+      botao.disabled = true;
+      dizer('');
+      try {
+        await aoCapturar({
+          progresso: (n) => { botao.textContent = `Varrendo... (${n})`; },
+          pronto: (n) => dizer(`${n} produto(s) prontos. Abra o painel lateral, revise e clique "Enviar ao Hub".`, 'ok'),
+          erro: (texto) => dizer(texto, 'erro'),
+        });
+      } catch (e) {
+        // "Extension context invalidated" nao e bug: acontece toda vez que a
+        // extensao e recarregada em chrome://extensions com esta aba ja
+        // aberta -- o script daqui fica orfao, sem conexao com a extensao
+        // reiniciada. So um F5 nesta pagina resolve.
+        dizer(
+          /context invalidated/i.test(e.message || '')
+            ? 'A extensão foi recarregada. Dê um F5 nesta página e tente de novo.'
+            : e.message,
+          'erro',
+        );
+      } finally {
+        botao.disabled = false;
+        botao.textContent = rotulo;
+      }
+    });
+  }
+
   window.__HUB = {
     texto, parsePrecoBR, lerDinheiro, lerVendidos, lerPrecos,
     normalizarImagem, extrairMelhorImagem, novoAcumulador, registrar,
-    manterMontado, rolarAcumulando,
+    manterMontado, rolarAcumulando, montarWidget,
   };
 })(window);
