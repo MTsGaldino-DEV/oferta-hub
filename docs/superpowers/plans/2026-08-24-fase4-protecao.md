@@ -50,26 +50,26 @@ Esta fase age no WhatsApp de produção do usuário. Três regras absolutas:
 
 **Depends-on:** none.
 
-- [ ] **Step 1: Medir a proporção de LID contra número visível**
+- [ ] **Step 1: Confirmar o estado do levantamento**
 
-Esta medição decide o quanto o Filtro de DDI entrega na prática, e o usuário precisa saber o resultado. Ela vem **antes** do código.
+A medição da proporção de LID contra número visível **não pode ser feita a partir
+de `GroupMemberEvent`**: o controlador já verificou e a tabela está **vazia** —
+ninguém entrou ou saiu dos grupos desde que aquele registro foi ligado.
 
-Ligue o Docker se estiver desligado (`docker compose up -d`, ou peça ao usuário para abrir o Docker Desktop). Se não conseguir, **não invente o número** — reporte que não foi possível medir e siga para o Step 2.
+Confirme você mesmo, para o caso de ter mudado:
 
 ```bash
-docker compose exec -T db psql -U oferta -d ofertahub -t -A -F' | ' -c "
-select case
-         when participant like '%@lid' then 'LID (numero oculto)'
-         when participant like '%@s.whatsapp.net' then 'numero visivel'
-         else 'outro'
-       end as tipo,
-       count(*)
-from \"GroupMemberEvent\" group by 1;"
+docker compose exec -T db psql -U oferta -d ofertahub -t -A -c 'select count(*) from "GroupMemberEvent";'
 ```
 
-Registre o resultado no relatório, com uma frase dizendo o que ele significa: se a maioria for LID, o Filtro de DDI vai poder avaliar pouca gente.
+Se continuar em zero, **não tente medir por outro caminho nesta tarefa**. Em
+especial: **não** escreva um script que abra uma conexão Baileys própria. O
+container da API já mantém a sessão do usuário, e uma segunda conexão disputa a
+mesma sessão — isso já derrubou o WhatsApp dele uma vez nesta empreitada.
 
-Traga também uma amostra de 5 valores de `participant` (sem inventar, os reais) para o relatório — o formato exato importa para a Task 2.
+A medição foi movida para a Task 3, que já vai mexer no `syncGroups()` e pode
+contar os formatos usando a conexão que já existe. Registre no relatório que o
+levantamento está pendente e por quê.
 
 - [ ] **Step 2: Acrescentar os models ao schema**
 
@@ -356,7 +356,7 @@ Em `apps/api/src/whatsapp/baileys.ts`, acrescentar um método à classe:
 
 Confirme a assinatura real de `groupParticipantsUpdate` na versão do Baileys instalada antes de escrever — leia os tipos em `node_modules/@whiskeysockets/baileys`. Não assuma.
 
-- [ ] **Step 3: Guardar quem é admin no sync**
+- [ ] **Step 3: Guardar quem é admin no sync, e medir o formato dos JIDs**
 
 No `syncGroups()` (por volta da linha 238), o `meta.participants` traz o papel de cada um. Descubra o JID da própria conta (`this.sock.user?.id`, normalizado) e grave se ele é admin:
 
@@ -368,6 +368,24 @@ No `syncGroups()` (por volta da linha 238), o `meta.participants` traz o papel d
 **Confirme o formato real** de `sock.user.id` e de `p.admin` lendo os tipos do Baileys — `sock.user.id` costuma vir com sufixo de dispositivo (`:12`) que precisa ser tirado antes de comparar. Se não conseguir determinar com segurança, **reporte em vez de chutar**: um `botIsAdmin` errado faz a tela mentir sobre o que consegue fazer.
 
 Passe `botIsAdmin` ao `upsert` que já existe.
+
+**E faça aqui a medição que ficou pendente da Task 1.** Ainda dentro do
+`syncGroups()`, contando sobre `meta.participants` de todos os grupos, conte
+quantos participantes têm número visível (`@s.whatsapp.net`) e quantos vêm como
+`@lid`, e registre num `logger.info` com os dois números.
+
+Isso decide o quanto o Filtro de DDI entrega na prática: participante em LID não
+carrega número, e o filtro não tem o que avaliar. Use a conexão que já está
+aberta — **nunca** abra uma segunda conexão Baileys.
+
+Depois do rebuild, dispare `POST /api/whatsapp/sync-groups` e pegue os números:
+
+```bash
+docker compose logs api --tail 50 | grep -i "lid\|visivel"
+```
+
+**Reporte os dois números no relatório.** Se a maioria for LID, o usuário precisa
+saber que o Filtro de DDI vai enxergar pouca coisa.
 
 - [ ] **Step 4: O módulo de moderação**
 
