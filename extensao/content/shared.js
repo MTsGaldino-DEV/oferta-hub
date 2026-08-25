@@ -311,8 +311,91 @@
     if (junto.title && junto.imageUrl && junto.price) acc.prontos.add(id);
   }
 
+  /**
+   * Mantem um elemento fixo montado mesmo quando a pagina remonta o body.
+   *
+   * A Amazon re-renderiza a grade de resultados durante o autoscroll e leva o
+   * host junto. O garimpo entao morre EM SILENCIO: os elementos que a gente
+   * atualiza (contador, mensagem de erro) continuam existindo como nos
+   * DESTACADOS, entao escrever neles nao lanca -- so nao aparece pra ninguem.
+   * Medido pela concorrente numa busca da Amazon: a varredura parou em 640px
+   * de 6.298px, sem widget na tela e sem nenhuma mensagem ao usuario.
+   *
+   * Remontar preserva o estado: o conteudo vive dentro do proprio host, entao
+   * re-anexar o MESMO elemento devolve a UI exatamente como estava.
+   *
+   * Dois observadores, ambos so de childList (sem subtree): num autoscroll a
+   * pagina dispara milhares de mutacoes, e observar a arvore inteira custaria
+   * caro justamente no momento mais pesado.
+   *  - no body: pega a remocao do host;
+   *  - no documentElement: pega a troca do body INTEIRO, caso em que o
+   *    observador do body antigo fica orfao e precisa ser refeito.
+   */
+  function manterMontado(host) {
+    let obsBody = null;
+    function garantir() {
+      if (!document.body || host.isConnected) return;
+      document.body.appendChild(host);
+      observarBody();
+    }
+    function observarBody() {
+      if (obsBody) obsBody.disconnect();
+      if (!document.body) return;
+      obsBody = new MutationObserver(garantir);
+      obsBody.observe(document.body, { childList: true });
+    }
+    new MutationObserver(garantir).observe(document.documentElement, { childList: true });
+    observarBody();
+    return garantir;
+  }
+
+  /**
+   * Rola a pagina acumulando o que cada parada revelou.
+   *
+   * Grid virtualizado (o painel de afiliado do ML, a grade da Amazon) so
+   * mantem no DOM os cards perto da posicao atual -- os que saem da vista
+   * SOMEM. Pular direto pro fim so ve a primeira leva e a ultima. Por isso
+   * rola em passos de quase uma tela e chama `varrer` em CADA parada, nunca
+   * so no estado final.
+   *
+   * `varrer(acc)` faz o registro no acumulador e devolve quantos ja tem.
+   * Volta pro topo no fim: deixar o usuario no rodape de uma busca de 200
+   * itens e desorientador.
+   */
+  async function rolarAcumulando(varrer, opcoes = {}) {
+    const { alvo = Infinity, esperaMs = 500, maxPassos = 150, aoProgredir } = opcoes;
+    const acc = novoAcumulador();
+    const origemY = window.scrollY;
+    let semNovoNoFim = 0;
+    let anterior = 0;
+
+    for (let i = 0; i < maxPassos; i++) {
+      const total = varrer(acc);
+      if (aoProgredir) aoProgredir(total);
+      if (total >= alvo) break;
+
+      const noFim = window.scrollY + window.innerHeight >= document.body.scrollHeight - 4;
+      if (noFim && total === anterior) {
+        // Tres paradas no rodape sem nada novo: a pagina acabou de verdade, e
+        // nao e o carregamento por scroll infinito ainda buscando.
+        if (++semNovoNoFim >= 3) break;
+      } else {
+        semNovoNoFim = 0;
+      }
+      anterior = total;
+
+      window.scrollBy(0, Math.round(window.innerHeight * 0.9));
+      await new Promise((r) => setTimeout(r, esperaMs));
+    }
+
+    varrer(acc);
+    window.scrollTo({ top: origemY });
+    return [...acc.produtos.values()];
+  }
+
   window.__HUB = {
     texto, parsePrecoBR, lerDinheiro, lerVendidos, lerPrecos,
     normalizarImagem, extrairMelhorImagem, novoAcumulador, registrar,
+    manterMontado, rolarAcumulando,
   };
 })(window);
