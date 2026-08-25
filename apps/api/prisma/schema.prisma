@@ -327,6 +327,10 @@ model WhatsappGroup {
   /// boot) e ajustada incrementalmente pelo evento group-participants.update
   /// entre um sync e outro -- ver whatsapp/baileys.ts.
   memberCount Int?
+  /// Se o numero conectado e admin do grupo. Sem admin nao ha como remover
+  /// ninguem, e a tela precisa dizer isso em vez de deixar o usuario ligar uma
+  /// protecao que nunca vai agir. Preenchido no syncGroups().
+  botIsAdmin Boolean @default(false)
   updatedAt DateTime @updatedAt
 }
 
@@ -445,4 +449,40 @@ model SendLog {
   id     String   @id @default(cuid())
   day    String   @unique
   count  Int      @default(0)
+}
+
+/// Numeros barrados em todos os grupos. `phone` guarda so digitos, com DDI,
+/// ja normalizado -- e a chave de comparacao contra quem entra.
+model BlockedNumber {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+/// Registro de toda acao de moderacao, inclusive as que falharam ou foram
+/// puladas. Remocao e irreversivel: sem log nao ha como auditar depois.
+model ModerationLog {
+  id          String           @id @default(cuid())
+  groupJid    String
+  participant String
+  action      ModerationAction
+  reason      ModerationReason
+  detail      String?
+  occurredAt  DateTime         @default(now())
+
+  @@index([groupJid, occurredAt])
+  @@index([occurredAt])
+}
+
+enum ModerationAction {
+  REMOVED
+  FAILED
+  SKIPPED
+}
+
+enum ModerationReason {
+  BLOCKLIST
+  FOREIGN_DDI
+  MANUAL
 }
