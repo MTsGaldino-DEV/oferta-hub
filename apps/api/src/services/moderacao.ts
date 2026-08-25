@@ -12,11 +12,15 @@ import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
 import { createMutex } from '../lib/mutex.js';
-import { semSufixoDispositivo, whatsapp } from '../whatsapp/baileys.js';
+import {
+  formasDoParticipante,
+  RemocaoSemConfirmacaoError,
+  semSufixoDispositivo,
+  whatsapp,
+} from '../whatsapp/baileys.js';
 import { decidir, normalizarNumero, type Decisao } from './protecao.js';
 
 type MotivoRemocao = Extract<Decisao, { remover: true }>['motivo'];
-type MotivoNaoRemovido = Extract<Decisao, { remover: false }>['motivo'];
 
 // O produto e brasileiro e o cartao "Filtro de DDI" na tela (ver spec da fase)
 // so tem liga-desliga -- nao existe campo pra digitar outro DDI. Por isso o
@@ -69,13 +73,36 @@ async function contadorHoje(): Promise<number> {
   return row ? Number(row.value) || 0 : 0;
 }
 
-async function setContadorHoje(valor: number): Promise<void> {
+/**
+ * Incrementa o contador atomicamente entre PROCESSOS, nao so dentro de um --
+ * o mutex `lock` la embaixo so serializa chamadas no mesmo processo Node, e
+ * ha copias do dev-server rodando no host alem do container (achado da
+ * verificacao anterior). `AppSetting.value` e String (schema fechado nesta
+ * fase), entao nao da pra usar o `{ increment }` nativo do Prisma como
+ * `SendLog.count` usa. Compare-and-swap via `updateMany` com o valor lido no
+ * WHERE e o equivalente sem escrever SQL cru: o UPDATE so aplica se ninguem
+ * escreveu entre a leitura e agora; se alguem escreveu, tenta de novo.
+ */
+async function incrementarContadorHoje(): Promise<void> {
   const key = chaveContadorHoje();
-  await prisma.appSetting.upsert({
-    where: { key },
-    create: { key, value: String(valor) },
-    update: { value: String(valor) },
-  });
+  for (let tentativa = 0; tentativa < 10; tentativa++) {
+    const atual = await prisma.appSetting.findUnique({ where: { key } });
+    if (!atual) {
+      try {
+        await prisma.appSetting.create({ data: { key, value: '1' } });
+        return;
+      } catch {
+        continue; // outro processo criou a linha primeiro -- tenta de novo como update
+      }
+    }
+    const novoValor = String((Number(atual.value) || 0) + 1);
+    const resultado = await prisma.appSetting.updateMany({
+      where: { key, value: atual.value },
+      data: { value: novoValor },
+    });
+    if (resultado.count === 1) return; // ninguem mexeu entre a leitura e a escrita
+  }
+  throw new Error('nao consegui incrementar o contador diario de remocoes (contencao demais)');
 }
 
 async function registrar(
@@ -86,23 +113,6 @@ async function registrar(
   detail: string | null,
 ): Promise<void> {
   await prisma.moderationLog.create({ data: { groupJid, participant, action, reason, detail } });
-}
-
-/**
- * ModerationReason do schema so tem BLOCKLIST | FOREIGN_DDI | MANUAL (Task 1
- * ja fechou o schema), mas decidir() produz quatro motivos de nao-remocao e
- * so dois cabem nessas categorias. Mapeamento, com o motivo real sempre
- * preservado no detail:
- *   - NAO_AVALIAVEL e PERMITIDO nascem da mesma guarda -- a que olha numero
- *     visivel pra decidir DDI (NAO_AVALIAVEL e literalmente "essa guarda nao
- *     tinha o que avaliar"). FOREIGN_DDI.
- *   - PROPRIO e ADMIN sao guardas de seguranca que nao vem de nenhuma
- *     configuracao do usuario -- nao sao decisao de blocklist nem de DDI.
- *     MANUAL, o mais neutro dos tres.
- */
-function reasonDoSkip(motivo: MotivoNaoRemovido): ModerationReason {
-  if (motivo === 'NAO_AVALIAVEL' || motivo === 'PERMITIDO') return ModerationReason.FOREIGN_DDI;
-  return ModerationReason.MANUAL;
 }
 
 let ultimaRemocaoEm = 0;
@@ -162,16 +172,32 @@ export async function removerParticipante(
     try {
       await whatsapp.removerDoGrupo(groupJid, jid);
     } catch (err) {
-      // Nao mexe em ultimaRemocaoEm nem no contador -- essa tentativa nao
-      // consumiu o ritmo nem o teto, so falhou. Nao ha laco de retry aqui: o
-      // participante segue no grupo ate a proxima avaliacao real (proxima
-      // entrada, ou o usuario rodar a Guilhotina).
+      // O relogio do ritmo avanca em QUALQUER tentativa, sucesso ou falha --
+      // senao uma sequencia de recusas (ex: botIsAdmin desatualizado no
+      // banco, bot foi rebaixado) dispara em rajada, sem esperar entre uma
+      // e outra, exatamente o padrao que o intervalo existe pra evitar.
+      ultimaRemocaoEm = Date.now();
+
+      if (err instanceof RemocaoSemConfirmacaoError) {
+        // Resposta sem eco nao e recusa (ver removerDoGrupo) -- na duvida, o
+        // conservador e assumir que a remocao ocorreu: consome o teto do
+        // mesmo jeito que um sucesso confirmado, senao o contador fica
+        // sistematicamente atrasado em relacao ao que aconteceu de verdade.
+        await incrementarContadorHoje();
+        await registrar(groupJid, jid, ModerationAction.REMOVED, reason, 'resposta sem confirmacao, assumido como removido');
+        return 'REMOVED';
+      }
+
+      // Nao ha laco de retry aqui: o participante segue no grupo ate a
+      // proxima avaliacao real (proxima entrada, ou o usuario rodar a
+      // Guilhotina). Insistir numa remocao que o WhatsApp recusou e o
+      // padrao que queima o numero do usuario.
       await registrar(groupJid, jid, ModerationAction.FAILED, reason, String(err));
       return 'FAILED';
     }
 
     ultimaRemocaoEm = Date.now();
-    await setContadorHoje(usados + 1);
+    await incrementarContadorHoje();
     await registrar(groupJid, jid, ModerationAction.REMOVED, reason, null);
     return 'REMOVED';
   });
@@ -186,7 +212,10 @@ export async function removerParticipante(
  */
 export async function avaliarEntrada(groupJid: string, jids: string[]): Promise<void> {
   const config = await carregarConfig();
-  if (!config.escudo && !config.ddi) return; // nenhuma protecao ligada -- nao toca no banco
+  // Ja leu AppSetting duas vezes acima (carregarConfig) -- o que essa saida
+  // evita e o resto: fetch de metadados, blocklist, e qualquer escrita em
+  // ModerationLog.
+  if (!config.escudo && !config.ddi) return;
 
   const grupo = await prisma.whatsappGroup.findUnique({ where: { jid: groupJid } });
   if (!grupo?.botIsAdmin) {
@@ -218,9 +247,39 @@ export async function avaliarEntrada(groupJid: string, jids: string[]): Promise<
     return;
   }
 
-  const eu = whatsapp.me ? semSufixoDispositivo(whatsapp.me) : '';
+  if (!whatsapp.me) {
+    // Sem isso nao da pra garantir que o bot nao removeria a si mesmo -- o
+    // fallback '' que existia aqui antes desligava a guarda em silencio
+    // (mesmoParticipante(jid, '') e sempre falso). Melhor nao avaliar.
+    for (const jid of jids) {
+      await registrar(
+        groupJid,
+        jid,
+        ModerationAction.SKIPPED,
+        ModerationReason.MANUAL,
+        'conta propria desconhecida no momento -- nao avalio pra nao arriscar remover o proprio bot',
+      );
+    }
+    return;
+  }
+
+  // `meuJid`/`meuLid` (nao so um): a propria conta tem duas identidades
+  // possiveis (sock.user.id e sock.user.lid -- ver baileys.ts), e o
+  // participante avaliado no loop abaixo pode chegar em qualquer uma das
+  // duas formas dependendo do endereçamento do grupo. decidir() so aceita
+  // um jidProprio por chamada, entao escolhe por iteracao a forma que
+  // combina com o jid sendo avaliado.
+  const meuJid = semSufixoDispositivo(whatsapp.me);
+  const meuLid = whatsapp.meLid ? semSufixoDispositivo(whatsapp.meLid) : null;
+
+  // admins: cada participante pode ter ate tres formas (id/jid/lid) -- juntar
+  // todas no Set e o mesmo defeito e a mesma correcao do botIsAdmin em
+  // baileys.ts. Sem isso, um admin de verdade num grupo com endereçamento
+  // LID passaria pela guarda ADMIN e seria removido por engano.
   const admins = new Set(
-    meta.participants.filter((p) => p.admin === 'admin' || p.admin === 'superadmin').map((p) => p.id),
+    meta.participants
+      .filter((p) => p.admin === 'admin' || p.admin === 'superadmin')
+      .flatMap((p) => formasDoParticipante(p)),
   );
 
   // bloqueados so entra na decisao se o Escudo estiver ligado -- decidir() e
@@ -236,25 +295,27 @@ export async function avaliarEntrada(groupJid: string, jids: string[]): Promise<
     : new Set<string>();
 
   for (const jid of jids) {
+    const jidProprio = jid.toLowerCase().endsWith('@lid') && meuLid ? meuLid : meuJid;
     const decisao = decidir({
       jid,
       bloqueados,
       filtroDdiLigado: config.ddi,
       ddiPermitido: DDI_PERMITIDO,
-      jidProprio: eu,
+      jidProprio,
       admins,
     });
 
     if (decisao.remover) {
       await removerParticipante(groupJid, jid, decisao.motivo);
     } else {
-      await registrar(
-        groupJid,
-        jid,
-        ModerationAction.SKIPPED,
-        reasonDoSkip(decisao.motivo),
-        `nao removido: ${decisao.motivo}`,
-      );
+      // ModerationReason so tem BLOCKLIST | FOREIGN_DDI | MANUAL, e
+      // FOREIGN_DDI so pode significar remocao por DDI, tentada ou barrada
+      // pelo teto -- nunca "nao removido". Um PERMITIDO (brasileiro, tudo
+      // certo) gravado como FOREIGN_DDI faria consulta agrupada por reason
+      // contar gente legitima como estrangeira. Todo remover:false vira
+      // MANUAL; o motivo real de decidir() (inclusive NAO_AVALIAVEL, o que
+      // importa pra medir o alcance do Filtro de DDI) fica no detail.
+      await registrar(groupJid, jid, ModerationAction.SKIPPED, ModerationReason.MANUAL, `nao removido: ${decisao.motivo}`);
     }
   }
 }

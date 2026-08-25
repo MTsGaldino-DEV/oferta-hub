@@ -20,10 +20,44 @@ import { avaliarEntrada } from '../services/moderacao.js';
  * (numero:12@dominio); participantes de grupo (meta.participants) chegam sem
  * ele. Sem cortar, a comparacao nunca bate -- usado tanto pro botIsAdmin do
  * sync quanto pela moderacao pra reconhecer a propria conta.
+ *
+ * Baixa a caixa tambem (o sufixo do servidor pode variar) e nao quebra se a
+ * entrada nao tiver "@" -- devolve ela lowercased em vez de produzir
+ * "x@undefined".
  */
 export function semSufixoDispositivo(jid: string): string {
-  const [usuario, dominio] = jid.split('@');
+  const [usuario, dominio] = jid.toLowerCase().split('@');
+  if (!dominio) return jid.toLowerCase();
   return `${usuario.split(':')[0]}@${dominio}`;
+}
+
+/**
+ * Um participante pode aparecer em ate tres formas (`id`, `jid`, `lid` --
+ * ver lib/Socket/groups.js: `id: attrs.jid, jid: ..., lid: ...`), e a propria
+ * conta tambem tem duas identidades possiveis (`sock.user.id` e
+ * `sock.user.lid`, ver lib/Socket/socket.js:504). Comparar so `p.id === eu`
+ * falha sempre que o grupo usa endereçamento LID e `eu` foi lido no formato
+ * jid (ou vice-versa) -- o mesmo participante nunca bate porque as strings
+ * sao de espacos diferentes.
+ *
+ * Exportada: a moderacao usa a mesma coisa pra montar o Set de admins do
+ * grupo (mesmo defeito, mesma correcao).
+ */
+export function formasDoParticipante(p: { id: string; jid?: string; lid?: string }): string[] {
+  return [p.id, p.jid, p.lid].filter((v): v is string => !!v);
+}
+
+/** `meusIds` junta as duas identidades proprias (id e lid, sem sufixo de
+ * dispositivo); `ehParticipanteProprio` testa as formas do participante
+ * contra elas. */
+function meusIds(sock: WASocket): Set<string> {
+  return new Set(
+    [sock.user?.id, sock.user?.lid].filter((v): v is string => !!v).map(semSufixoDispositivo),
+  );
+}
+
+function ehParticipanteProprio(p: { id: string; jid?: string; lid?: string }, ids: Set<string>): boolean {
+  return formasDoParticipante(p).some((v) => ids.has(v));
 }
 
 /**
@@ -100,6 +134,20 @@ export class WhatsAppRetryableError extends Error {
   }
 }
 
+/**
+ * `removerDoGrupo` usa isso quando o Baileys devolve a lista de afetados
+ * vazia mesmo apos a remocao ser aceita (ver comentario ali). Nao e uma
+ * falha de verdade -- quem chama (moderacao.ts) trata via `instanceof`
+ * assumindo que a remocao ocorreu, em vez de registrar FAILED pra algo que
+ * pode ter dado certo.
+ */
+export class RemocaoSemConfirmacaoError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RemocaoSemConfirmacaoError';
+  }
+}
+
 class WhatsAppService {
   private sock: WASocket | null = null;
   private lastSentAt = 0;
@@ -110,6 +158,13 @@ class WhatsAppService {
   status: Status = 'disconnected';
   qrDataUrl: string | null = null;
   me: string | null = null;
+  // Identidade LID da propria conta -- existe porque grupo com endereçamento
+  // LID nunca bate contra `me` (que vem em formato jid). Preenchida junto
+  // com `me`; `sock.user.lid` so chega depois do merge do 'creds.update'
+  // interno do Baileys (lib/Socket/socket.js:558), que roda antes do nosso
+  // handler de 'connection.update' == 'open' (emitido logo em seguida no
+  // mesmo fluxo de login, lib/Socket/socket.js:504).
+  meLid: string | null = null;
 
   async connect(): Promise<void> {
     if (this.status === 'connecting' || this.status === 'connected') return;
@@ -144,7 +199,8 @@ class WhatsAppService {
         this.status = 'connected';
         this.qrDataUrl = null;
         this.me = this.sock?.user?.id ?? null;
-        logger.info({ me: this.me }, 'WhatsApp conectado');
+        this.meLid = this.sock?.user?.lid ?? null;
+        logger.info({ me: this.me, meLid: this.meLid }, 'WhatsApp conectado');
         await this.syncGroups();
       }
 
@@ -229,6 +285,7 @@ class WhatsAppService {
     this.status = 'disconnected';
     this.qrDataUrl = null;
     this.me = null;
+    this.meLid = null;
   }
 
   /**
@@ -257,22 +314,29 @@ class WhatsAppService {
   async syncGroups() {
     if (!this.sock) return;
     const groups = await this.sock.groupFetchAllParticipating();
-    const eu = this.sock.user?.id ? semSufixoDispositivo(this.sock.user.id) : null;
+    const ids = meusIds(this.sock);
 
-    // Quanto o Filtro de DDI enxerga na pratica: participante em LID nao
-    // carrega numero, entao nao ha DDI pra comparar. Medicao pendente desde a
-    // Task 1 -- so dava pra fazer aqui, com a conexao que ja esta aberta.
-    let comNumeroVisivel = 0;
-    let comLid = 0;
+    // Quanto o Filtro de DDI enxerga na pratica. `p.id` sozinho SUBESTIMA:
+    // groups.js preenche `p.jid` com o numero (via phone_number) mesmo
+    // quando `p.id` veio em LID -- ver lib/Socket/groups.js:312-318. `p.jid`
+    // vazio ('') e o unico sinal confiavel de "sem numero em lugar nenhum".
+    // Os tres contam coisas diferentes de proposito: idEhNumero mede so o
+    // campo antigo (pra comparar com a medicao anterior, que estava errada);
+    // jidPreenchido e a metrica real de visibilidade; semNumero e o
+    // complemento dela, o ponto cego de verdade.
+    let idEhNumero = 0;
+    let jidPreenchido = 0;
+    let semNumero = 0;
 
     for (const [jid, meta] of Object.entries(groups)) {
       const memberCount = meta.participants.length;
       const botIsAdmin = meta.participants.some(
-        (p) => p.id === eu && (p.admin === 'admin' || p.admin === 'superadmin'),
+        (p) => ehParticipanteProprio(p, ids) && (p.admin === 'admin' || p.admin === 'superadmin'),
       );
       for (const p of meta.participants) {
-        if (p.id.endsWith('@s.whatsapp.net')) comNumeroVisivel++;
-        else if (p.id.endsWith('@lid')) comLid++;
+        if (p.id.endsWith('@s.whatsapp.net')) idEhNumero++;
+        if (p.jid) jidPreenchido++;
+        else semNumero++;
       }
       await prisma.whatsappGroup.upsert({
         where: { jid },
@@ -280,7 +344,7 @@ class WhatsAppService {
         update: { name: meta.subject, memberCount, botIsAdmin },
       });
     }
-    logger.info({ comNumeroVisivel, comLid }, 'participantes com numero visivel vs LID');
+    logger.info({ idEhNumero, jidPreenchido, semNumero }, 'participantes com numero visivel (id vs jid) vs sem numero nenhum');
     logger.info({ count: Object.keys(groups).length }, 'grupos sincronizados');
   }
 
@@ -296,8 +360,15 @@ class WhatsAppService {
   async removerDoGrupo(groupJid: string, participantJid: string): Promise<void> {
     if (!this.sock) throw new Error('WhatsApp desconectado. Conecte em Configurações › Canais.');
     const [resultado] = await this.sock.groupParticipantsUpdate(groupJid, [participantJid], 'remove');
-    if (resultado?.status !== '200') {
-      throw new Error(`WhatsApp recusou a remocao (status ${resultado?.status ?? 'desconhecido'})`);
+    if (!resultado) {
+      // lib/Socket/groups.js:150-153: `getBinaryNodeChildren(node, 'participant')`
+      // pode vir vazia mesmo com a remocao aceita -- resposta sem eco, nao
+      // recusa. Erro proprio: quem chama trata isso como "provavelmente
+      // saiu", nao como falha (ver RemocaoSemConfirmacaoError).
+      throw new RemocaoSemConfirmacaoError('WhatsApp nao confirmou a remocao (resposta sem participante)');
+    }
+    if (resultado.status !== '200') {
+      throw new Error(`WhatsApp recusou a remocao (status ${resultado.status})`);
     }
   }
 
