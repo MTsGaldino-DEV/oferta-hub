@@ -27,12 +27,35 @@ assert.equal(normalizarNumero('abc'), null);
 assert.equal(normalizarNumero('123'), null, 'digitos de menos');
 assert.equal(normalizarNumero('1'.repeat(20)), null, 'digitos demais');
 
+// Numero local sem DDI nunca bate com um JID (que sempre traz DDI) --
+// aceitar e falhar calado, entao rejeita na entrada.
+assert.equal(normalizarNumero('1187654321'), null, 'numero sem DDI nunca bate com JID');
+
+// O nono digito e regra so do Brasil (DDI 55): um numero de outro pais no
+// mesmo formato de tamanho nao pode ser mexido. Guarda contra afrouxar o
+// gate de comprimento/prefixo da regra brasileira no futuro.
+assert.equal(normalizarNumero('56912345678'), '56912345678', 'nono digito e regra so do Brasil');
+
 // --- extracao do JID ---
 
 assert.equal(numeroDoJid('5511987654321@s.whatsapp.net'), normalizarNumero('5511987654321'));
 assert.equal(numeroDoJid('209384756@lid'), null, 'LID nao carrega numero');
 assert.equal(numeroDoJid('120363000000000000@g.us'), null, 'jid de grupo nao e pessoa');
 assert.equal(numeroDoJid(''), null);
+
+// Sufixo de dispositivo (conta propria) nao muda a identidade da pessoa.
+assert.equal(
+  numeroDoJid('5511999999999:12@s.whatsapp.net'),
+  numeroDoJid('5511999999999@s.whatsapp.net'),
+  'sufixo de dispositivo nao muda a identidade',
+);
+
+// Sufixo do servidor pode variar de caixa.
+assert.equal(
+  numeroDoJid('5511999999999@S.Whatsapp.Net'),
+  numeroDoJid('5511999999999@s.whatsapp.net'),
+  'sufixo case-insensitive',
+);
 
 // --- decisao ---
 
@@ -103,5 +126,36 @@ assert.equal(
   decidir({ ...base, bloqueados: new Set(), filtroDdiLigado: false, jid: '447700900000@s.whatsapp.net' }).remover,
   false,
 );
+
+// DDI de configuracao em texto livre (com "+" ou espaco) nao pode esvaziar
+// o grupo inteiro: compara so digito com digito.
+assert.deepEqual(decidir({ ...base, ddiPermitido: '+55', jid: '5521912345678@s.whatsapp.net' }), {
+  remover: false,
+  motivo: 'PERMITIDO',
+});
+
+// Propria conta com sufixo de dispositivo (como o Baileys entrega) tem que
+// bater com o participante sem sufixo -- senao o usuario se auto-remove.
+assert.deepEqual(
+  decidir({ ...base, jidProprio: '5511000000000:12@s.whatsapp.net', jid: '5511000000000@s.whatsapp.net' }),
+  { remover: false, motivo: 'PROPRIO' },
+);
+
+// Admin com sufixo de dispositivo tambem tem que bater.
+assert.deepEqual(
+  decidir({
+    ...base,
+    admins: new Set(['5511777777777:5@s.whatsapp.net']),
+    jid: '5511777777777@s.whatsapp.net',
+  }),
+  { remover: false, motivo: 'ADMIN' },
+);
+
+// LID com filtro desligado tambem e nao avaliavel -- a auditoria nao pode
+// dizer "liberado" pra quem ninguem conseguiu olhar.
+assert.deepEqual(decidir({ ...base, filtroDdiLigado: false, jid: '209384756@lid' }), {
+  remover: false,
+  motivo: 'NAO_AVALIAVEL',
+});
 
 console.log('protecao.check: ok');
