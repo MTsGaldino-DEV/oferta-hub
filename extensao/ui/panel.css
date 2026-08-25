@@ -302,3 +302,13 @@ body {
 
 .log-item[data-nivel='erro'] .log-item__texto { color: #ff8b7a; }
 .log-item[data-nivel='aviso'] .log-item__texto { color: #ffd166; }
+
+/* Selo discreto da loja de origem. Fica abaixo do preco: quem revisa olha
+   titulo e preco primeiro; a loja so importa quando alguma coisa parece
+   errada. */
+.item__loja {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: #8a8f98;
+}

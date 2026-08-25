@@ -62,7 +62,21 @@ let abaId = null;
 /** [{ produto, selecionado }] -- o que a pagina atual ofereceu para captura. */
 let itens = [];
 
-const ehPaginaMl = (url) => /(^|\/\/)([^/]*\.)?mercadoli(vre|bre)\.com(\.br)?\//i.test(url || '');
+/**
+ * Hosts que a extensao sabe capturar. Precisa bater com o `matches` dos
+ * content_scripts do manifest: dizer "suportada" aqui numa pagina onde o
+ * content script nao roda leva o painel a mostrar area de captura e depois
+ * falhar no sendMessage.
+ */
+const LOJAS = [
+  { teste: /(^|\/\/)([^/]*\.)?mercadoli(vre|bre)\.com(\.br)?\//i, nome: 'Mercado Livre' },
+  { teste: /(^|\/\/)([^/]*\.)?amazon\.com\.br\//i, nome: 'Amazon' },
+];
+
+const ehPaginaSuportada = (url) => LOJAS.some((l) => l.teste.test(url || ''));
+
+/** Enum do backend -> nome que o humano reconhece. */
+const NOME_LOJA = { MERCADO_LIVRE: 'Mercado Livre', AMAZON: 'Amazon' };
 
 async function abaAtiva() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -105,7 +119,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 async function escanear() {
   $resultado.textContent = '';
   const tab = await abaAtiva();
-  if (!tab?.id || !ehPaginaMl(tab.url)) {
+  if (!tab?.id || !ehPaginaSuportada(tab.url)) {
     abaId = null;
     itens = [];
     mostrarSecao('fora-do-ml');
@@ -123,7 +137,7 @@ async function escanear() {
 
   itens = (resposta?.produtos || []).map((produto) => ({ produto, selecionado: true }));
   mostrarSecao('area-captura');
-  $origemAtual.textContent = itens[0]?.produto.origem === 'produto' ? 'Página do produto' : 'Busca';
+  $origemAtual.textContent = itens[0]?.produto.origem === 'produto' ? 'Página do produto' : 'Listagem';
   renderizar();
 }
 
@@ -187,7 +201,14 @@ function renderizar() {
       linhaPreco.appendChild(v);
     }
 
-    corpo.append(titulo, linhaPreco);
+    // A lista pode misturar lojas: captura no ML, troca de aba, captura na
+    // Amazon, revisa tudo junto antes de enviar. Sem o selo nao da pra saber
+    // de onde cada item veio.
+    const selo = document.createElement('span');
+    selo.className = 'item__loja';
+    selo.textContent = NOME_LOJA[produto.platform] || produto.platform;
+
+    corpo.append(titulo, linhaPreco, selo);
     linha.append(check, corpo);
     $lista.appendChild(linha);
     void i;
