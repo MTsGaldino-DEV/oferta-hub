@@ -14,6 +14,7 @@ import { logger } from '../lib/logger.js';
 import { createMutex } from '../lib/mutex.js';
 import {
   formasDoParticipante,
+  jidVisivelDoParticipante,
   RemocaoSemConfirmacaoError,
   semSufixoDispositivo,
   whatsapp,
@@ -105,7 +106,10 @@ async function incrementarContadorHoje(): Promise<void> {
   throw new Error('nao consegui incrementar o contador diario de remocoes (contencao demais)');
 }
 
-async function registrar(
+// Exportada: a rota de remocao manual (protecao.ts) reafirma a guarda de
+// PROPRIO/ADMIN no momento da remocao e precisa registrar o SKIPPED com o
+// mesmo formato de auditoria, em vez de escrever uma segunda funcao de log.
+export async function registrar(
   groupJid: string,
   participant: string,
   action: ModerationAction,
@@ -295,9 +299,35 @@ export async function avaliarEntrada(groupJid: string, jids: string[]): Promise<
     : new Set<string>();
 
   for (const jid of jids) {
-    const jidProprio = jid.toLowerCase().endsWith('@lid') && meuLid ? meuLid : meuJid;
+    // messageStubParameters (o listener ao vivo) so traz o identificador cru
+    // que o WhatsApp anunciou na entrada -- sem o campo companheiro que
+    // carrega o numero (ver formasDoParticipante/jidVisivelDoParticipante em
+    // baileys.ts). meta.participants, ja buscado acima, tem os tres campos;
+    // casa pelo identificador do evento pra achar quem acabou de entrar.
+    const participante = meta.participants.find((p) => formasDoParticipante(p).includes(jid));
+    if (!participante) {
+      // Entrou e saiu antes da consulta ao metadata, ou o identificador do
+      // evento nao bate com nenhum participante atual -- nao da pra avaliar,
+      // e remover por suposicao expulsaria alguem por engano.
+      await registrar(
+        groupJid,
+        jid,
+        ModerationAction.SKIPPED,
+        ModerationReason.MANUAL,
+        'participante nao encontrado no metadata do grupo -- nao avaliavel',
+      );
+      continue;
+    }
+
+    // Avalia pelo jid que carrega o numero quando existe (jidVisivelDoParticipante),
+    // nao pelo identificador cru do evento -- e o que destrava o Filtro de DDI pra
+    // quem entrou em grupo com endereçamento LID. jidProprio escolhido pelo
+    // FORMATO desse jid avaliado (nao mais o do evento), pra mesmoParticipante()
+    // comparar formas compativeis dos dois lados.
+    const jidAvaliar = jidVisivelDoParticipante(participante);
+    const jidProprio = jidAvaliar.toLowerCase().endsWith('@lid') && meuLid ? meuLid : meuJid;
     const decisao = decidir({
-      jid,
+      jid: jidAvaliar,
       bloqueados,
       filtroDdiLigado: config.ddi,
       ddiPermitido: DDI_PERMITIDO,
@@ -306,6 +336,8 @@ export async function avaliarEntrada(groupJid: string, jids: string[]): Promise<
     });
 
     if (decisao.remover) {
+      // jid original (o que o WhatsApp anunciou na entrada), nao jidAvaliar --
+      // e o identificador que o grupo reconhece pra remocao de verdade.
       await removerParticipante(groupJid, jid, decisao.motivo);
     } else {
       // ModerationReason so tem BLOCKLIST | FOREIGN_DDI | MANUAL, e
