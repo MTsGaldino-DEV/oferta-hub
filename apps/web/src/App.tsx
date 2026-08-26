@@ -6,6 +6,7 @@ import { Logo } from './components/Logo.js';
 import { ProtocolToastProvider } from './components/ProtocolToast.js';
 import { VisaoGeral } from './pages/VisaoGeral.js';
 import { Fila } from './pages/Fila.js';
+import { Manual } from './pages/Manual.js';
 import { Desempenho } from './pages/Desempenho.js';
 import { MeusGrupos } from './pages/MeusGrupos.js';
 import { Garimpar } from './pages/Garimpar.js';
@@ -82,6 +83,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<VisaoGeral />} />
           <Route path="/fila" element={<Fila />} />
+          <Route path="/manual" element={<Manual />} />
           <Route path="/desempenho" element={<Desempenho />} />
           <Route path="/grupos" element={<MeusGrupos />} />
           <Route path="/garimpar" element={<Garimpar />} />

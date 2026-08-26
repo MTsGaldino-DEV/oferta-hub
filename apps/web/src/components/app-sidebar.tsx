@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   ListChecks,
   LogOut,
+  ScanLine,
   Search,
   Settings,
   Users,
@@ -35,6 +36,7 @@ const GROUPS: NavItem[][] = [
   [
     { to: '/', label: 'Visão geral', end: true, icon: LayoutDashboard },
     { to: '/fila', label: 'Fila', icon: ListChecks },
+    { to: '/manual', label: 'Manual', icon: ScanLine },
   ],
   [
     { to: '/garimpar', label: 'Garimpar', icon: Search },
