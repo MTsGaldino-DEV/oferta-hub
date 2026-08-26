@@ -17,6 +17,7 @@ enum Platform {
 }
 
 enum OfferStatus {
+  SCANNED // capturado por scan de extensao, aguardando revisao na aba Manual
   PENDING // esperando sua analise na fila
   QUEUED // aprovada, aguardando horario (Agenda)
   DISPATCHING // reservada por um Disparo -- fora da fila ate ele terminar ou ser cancelado
@@ -27,6 +28,7 @@ enum OfferStatus {
 
 enum OfferSource {
   MANUAL // voce colou o link
+  SCAN // capturado por scan de extensao (ML/Amazon/Shopee)
   WATCHLIST // caiu de preco em um produto vigiado
   DISCOVERY // garimpo automatico
 }
@@ -123,6 +125,7 @@ model Offer {
   shortLink   ShortLink?
   conversions Conversion[]
   disparoItems DisparoItem[]
+  manualSelections ManualSelection[]
 
   @@index([status, score])
   @@index([nicheId, status])
@@ -171,6 +174,30 @@ model Conversion {
 
   @@unique([platform, externalId])
   @@index([occurredAt])
+}
+
+/// Foto de toda oferta que chegou a ser ENVIADA ao grupo, capturada no
+/// instante do envio. Existe pra sobreviver ao Product mudando de preco com
+/// o tempo -- sem isso, consultar essa base depois mostraria o preco de
+/// HOJE, nao o que convenceu o envio. Alimenta a automacao futura de
+/// palavra-chave/categoria (nao construida nesta fase).
+model ManualSelection {
+  id            String      @id @default(cuid())
+  offerId       String
+  platform      Platform
+  externalId    String
+  title         String
+  category      String?
+  price         Decimal     @db.Decimal(12, 2)
+  commissionPct Decimal?    @db.Decimal(6, 3)
+  commissionBrl Decimal?    @db.Decimal(12, 2)
+  source        OfferSource
+  sentAt        DateTime    @default(now())
+
+  offer Offer @relation(fields: [offerId], references: [id])
+
+  @@index([platform])
+  @@index([sentAt])
 }
 
 /// Produto que voce escolheu vigiar. Dispara oferta quando cai do gatilho.
