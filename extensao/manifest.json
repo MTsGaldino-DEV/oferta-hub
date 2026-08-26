@@ -8,6 +8,7 @@
     "https://*.mercadolivre.com.br/*",
     "https://*.mercadolibre.com/*",
     "https://*.amazon.com.br/*",
+    "https://*.shopee.com.br/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
@@ -17,9 +18,10 @@
       "matches": [
         "https://*.mercadolivre.com.br/*",
         "https://*.mercadolibre.com/*",
-        "https://*.amazon.com.br/*"
+        "https://*.amazon.com.br/*",
+        "https://*.shopee.com.br/*"
       ],
-      "js": ["content/shared.js", "content/ml.js", "content/amazon.js"],
+      "js": ["content/shared.js", "content/ml.js", "content/amazon.js", "content/shopee.js"],
       "css": ["content/ml.css"],
       "run_at": "document_idle"
     }
