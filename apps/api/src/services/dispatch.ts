@@ -2,6 +2,7 @@ import { OfferStatus } from '@prisma/client';
 import { prisma } from '../db.js';
 import { logger } from '../lib/logger.js';
 import { whatsapp } from '../whatsapp/baileys.js';
+import { buildManualSelectionData } from './manual-selection.js';
 
 /** Grupo padrao marcado no dashboard, ou o primeiro sincronizado. */
 async function defaultGroupJid(): Promise<string> {
@@ -49,10 +50,12 @@ export async function sendOffer(
       imageUrl: offer.product.imageUrl,
     });
     logger.info({ offerId, jid }, 'oferta enviada');
-    return prisma.offer.update({
+    const sent = await prisma.offer.update({
       where: { id: offerId },
       data: { status: OfferStatus.SENT, sentAt: new Date(), groupJid: jid, failReason: null },
     });
+    await prisma.manualSelection.create({ data: buildManualSelectionData(offer, offer.product) });
+    return sent;
   } catch (err) {
     const failReason = err instanceof Error ? err.message : 'erro desconhecido';
     logger.error({ offerId, failReason }, 'falha ao enviar');
