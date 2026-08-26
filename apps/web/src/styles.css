@@ -262,7 +262,8 @@ a {
   margin-bottom: 24px;
 }
 
-.head h1 {
+.head h1,
+.head h2 {
   font-size: 30px;
   font-weight: 800;
   letter-spacing: -0.035em;
@@ -428,6 +429,46 @@ textarea {
   text-decoration: none;
 }
 
+/* Cabecalho do formulario colapsavel: mesmo peso visual de um controle
+   qualquer. O amarelo da marca fica reservado pra acao principal, que e
+   enviar -- nao pra abrir um formulario. */
+.acordeao {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+
+.acordeao:hover {
+  /* --brand e amarelo -- como cor de texto sobre fundo claro fica quase
+     ilegivel. Marca vira sublinhado, texto continua no --ink de sempre. */
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
+}
+
+.acordeao__seta {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--muted);
+}
+
+.acordeao__seta[data-aberto='true'] {
+  transform: rotate(90deg);
+}
+
+.acordeao__corpo {
+  margin-top: 14px;
+}
+
 .row {
   display: flex;
   gap: 10px;
@@ -478,6 +519,65 @@ textarea {
 
 .kpi__delta[data-dir='down'] {
   color: var(--drop);
+}
+
+/* Cartao por grupo: o numero de membros e o dado que o usuario procura
+   primeiro, entao ele domina o cartao e o resto orbita. */
+.grupos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.grupo {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 16px;
+  background: var(--surface);
+}
+
+.grupo__nome {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.grupo__linha {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.grupo__membros {
+  display: block;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.grupo__unidade {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.grupo__delta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.grupo__rodape {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
 }
 
 /* ---------------- etiqueta de preço (elemento assinatura) ---------------- */
@@ -697,6 +797,35 @@ textarea {
   text-align: right;
 }
 
+/* Cabecalho que ordena: parece cabecalho, age como botao. A coluna ativa
+   fica em destaque pra nao restar duvida sobre o que manda na ordem. */
+.th-ordenavel {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.th-ordenavel:hover {
+  /* --brand e amarelo -- como cor de texto sobre fundo claro fica quase
+     ilegivel. Marca vira sublinhado, texto continua no --ink de sempre. */
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
+}
+
+.th-ordenavel[data-ativa='true'] {
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--brand);
+}
+
 .cell-product {
   display: flex;
   align-items: center;
@@ -840,6 +969,32 @@ button.chip {
 .chart {
   width: 100%;
   height: 200px;
+  display: block;
+}
+
+/* Ancora pro tooltip posicionado em cima do svg. */
+.chart-wrap {
+  position: relative;
+}
+
+/* --raise + branco: mesmo par de cores do botao primario, pra destacar
+   sobre o painel (que ja usa --surface de fundo). */
+.chart-tooltip {
+  position: absolute;
+  top: 8px;
+  transform: translateX(-50%);
+  background: var(--raise);
+  color: #fff;
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow);
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart-tooltip strong {
   display: block;
 }
 
@@ -1116,6 +1271,16 @@ button.chip {
   border-color: color-mix(in srgb, var(--ink) 28%, transparent);
 }
 
+.card {
+  cursor: pointer;
+}
+
+/* No garimpo o card nao abre editor -- so o botao age. Sem isso o cursor
+   promete um clique que nao existe. */
+.card--estatico {
+  cursor: default;
+}
+
 .card[data-leaving='true'] {
   opacity: 0;
   transform: translateY(-8px);
@@ -1208,15 +1373,32 @@ button.chip {
 }
 
 .card__titulo {
+  margin: 0;
+}
+
+/* Botao real por baixo do titulo (ver PriceTag.tsx): reseta aparencia de
+   botao nativo e repete a tipografia que o h3 tinha, entao o que muda e so
+   a semantica -- visualmente segue parecendo o titulo que sempre foi. */
+.card__titulo-btn,
+.card__titulo-txt {
+  display: -webkit-box;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
   font-size: 13.5px;
   font-weight: 500;
   line-height: 1.35;
-  margin: 0;
+  color: inherit;
+  text-align: left;
   min-height: 2.7em;
-  display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.card__titulo-btn {
+  cursor: pointer;
 }
 
 .card__meta {
@@ -1301,6 +1483,19 @@ button.chip {
   font-weight: 600;
 }
 
+/* Nome da loja: minusculo e truncado. Loja da Shopee tem nome longo e
+   as vezes em caixa alta -- deixar herdar o uppercase do rodape faria a
+   linha gritar mais que o preco. */
+.card__loja {
+  min-width: 0;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
 .card__erro {
   font-size: 12px;
   color: var(--drop);
@@ -1335,6 +1530,20 @@ button.chip {
 
 .card__enviar {
   font-size: 13.5px;
+}
+
+/* A cor no hover carrega significado: amarelo leva a oferta adiante, vermelho
+   descarta. Sem isso os dois botoes reagem igual e a mao erra sem aviso. */
+.card__enviar:hover:not(:disabled) {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #000;
+}
+
+.card__botoes .btn--ghost:hover:not(:disabled) {
+  background: var(--drop);
+  border-color: var(--drop);
+  color: #000;
 }
 
 /* Ações secundárias em texto: mais botões cheios brigariam com o primário. */

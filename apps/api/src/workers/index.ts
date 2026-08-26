@@ -69,10 +69,17 @@ export async function runPriceMonitor(): Promise<MonitorSummary> {
       const cooling = item.lastFiredAt && Date.now() - item.lastFiredAt.getTime() < 12 * 60 * 60 * 1000;
 
       if ((hitTarget || hitDrop) && !cooling) {
-        await ingestProduct(fresh, OfferSource.WATCHLIST);
-        await prisma.watchItem.update({ where: { id: item.id }, data: { lastFiredAt: new Date() } });
-        logger.info({ product: fresh.title, from: before, to: fresh.price }, 'queda detectada');
-        fired++;
+        // ja existe oferta pendente desse produto, entao contar como disparo
+        // faria a tela prometer uma oferta que nao entrou
+        const jaPendente = await prisma.offer.findFirst({
+          where: { productId: item.productId, status: OfferStatus.PENDING },
+        });
+        if (!jaPendente) {
+          await ingestProduct(fresh, OfferSource.WATCHLIST);
+          await prisma.watchItem.update({ where: { id: item.id }, data: { lastFiredAt: new Date() } });
+          logger.info({ product: fresh.title, from: before, to: fresh.price }, 'queda detectada');
+          fired++;
+        }
       }
 
       await sleep(1500); // respeita rate limit das APIs

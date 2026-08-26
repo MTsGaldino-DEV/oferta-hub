@@ -84,8 +84,11 @@ Tá com um preço muito bom! 🔥
 ];
 
 /**
- * `update: {}` de proposito: o upsert existe pra CRIAR o que falta, nunca pra
- * desfazer edicao do usuario. Se o modelo ja existe, nada muda.
+ * Comparacao de nome ignora caixa de proposito: `name` e @unique case-sensitive
+ * no banco, entao um usuario com "Direto e Agressivo" (maiusculo) ganharia um
+ * irmao "Direto e agressivo" (minusculo) criado pelo seed a cada boot. Achou
+ * por nome equivalente, pula -- nunca cria, nunca da update, pra nao desfazer
+ * edicao do usuario.
  *
  * `isDefault` so entra na criacao, e so quando ainda nao ha nenhum padrao --
  * caso contrario o boot roubaria o padrao que o usuario escolheu.
@@ -95,10 +98,14 @@ export async function semearTemplates(): Promise<void> {
     const jaTemPadrao = (await prisma.messageTemplate.count({ where: { isDefault: true } })) > 0;
 
     for (const t of TEMPLATES_PRONTOS) {
-      await prisma.messageTemplate.upsert({
-        where: { name: t.name },
-        create: { name: t.name, body: t.body, isDefault: t.isDefault && !jaTemPadrao },
-        update: {},
+      const existente = await prisma.messageTemplate.findFirst({
+        where: { name: { equals: t.name, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (existente) continue;
+
+      await prisma.messageTemplate.create({
+        data: { name: t.name, body: t.body, isDefault: t.isDefault && !jaTemPadrao },
       });
     }
   } catch (err) {

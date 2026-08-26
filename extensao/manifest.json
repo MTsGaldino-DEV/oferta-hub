@@ -7,14 +7,21 @@
   "host_permissions": [
     "https://*.mercadolivre.com.br/*",
     "https://*.mercadolibre.com/*",
+    "https://*.amazon.com.br/*",
+    "https://*.shopee.com.br/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
   "background": { "service_worker": "background/service-worker.js", "type": "module" },
   "content_scripts": [
     {
-      "matches": ["https://*.mercadolivre.com.br/*", "https://*.mercadolibre.com/*"],
-      "js": ["content/ml.js"],
+      "matches": [
+        "https://*.mercadolivre.com.br/*",
+        "https://*.mercadolibre.com/*",
+        "https://*.amazon.com.br/*",
+        "https://*.shopee.com.br/*"
+      ],
+      "js": ["content/shared.js", "content/ml.js", "content/amazon.js", "content/shopee.js"],
       "css": ["content/ml.css"],
       "run_at": "document_idle"
     }

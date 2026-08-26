@@ -1,8 +1,27 @@
 import { OfferStatus, Platform } from '@prisma/client';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { prisma, num } from '../db.js';
+import { ehPendente, ordenar, type LinhaOferta } from './stats-offers.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const POR_PAGINA = 25;
+
+const queryOffers = z.object({
+  days: z.coerce
+    .number()
+    .int()
+    .min(1, 'O período deve ser de 1 a 180 dias.')
+    .max(180, 'O período deve ser de 1 a 180 dias.')
+    .default(30),
+  page: z.coerce.number().int().min(1, 'A página começa em 1.').default(1),
+  sort: z
+    .enum(['pendente', 'sentAt', 'clicks', 'orders', 'revenue', 'price', 'score'], {
+      message: 'Coluna de ordenação inválida.',
+    })
+    .default('pendente'),
+  dir: z.enum(['asc', 'desc'], { message: 'Direção de ordenação inválida.' }).default('desc'),
+});
 
 export async function statsRoutes(app: FastifyInstance) {
   /**
@@ -90,37 +109,45 @@ export async function statsRoutes(app: FastifyInstance) {
   });
 
   /** Ranking das ofertas enviadas: cliques e comissao por oferta. */
-  app.get<{ Querystring: { days?: string; limit?: string } }>('/api/stats/offers', async (req) => {
-    const days = Math.min(180, Math.max(1, Number(req.query.days ?? 30)));
+  app.get('/api/stats/offers', async (req) => {
+    const { days, page, sort, dir } = queryOffers.parse(req.query);
     const since = new Date(Date.now() - days * DAY_MS);
 
     const offers = await prisma.offer.findMany({
       where: { status: OfferStatus.SENT, sentAt: { gte: since } },
       include: { product: true, shortLink: true, conversions: true },
-      orderBy: { sentAt: 'desc' },
-      take: Number(req.query.limit ?? 100),
     });
 
-    return offers
-      .map((o) => {
-        const revenue = o.conversions.reduce((sum, c) => sum + Number(c.commissionBrl), 0);
-        const clicks = o.shortLink?.clickCount ?? 0;
-        return {
-          id: o.id,
-          title: o.product.title,
-          imageUrl: o.product.imageUrl,
-          platform: o.product.platform,
-          price: num(o.price),
-          discountPct: num(o.discountPct),
-          score: o.score,
-          sentAt: o.sentAt,
-          clicks,
-          orders: o.conversions.length,
-          revenue: Number(revenue.toFixed(2)),
-          conversionRate: clicks ? Number(((o.conversions.length / clicks) * 100).toFixed(1)) : 0,
-        };
-      })
-      .sort((a, b) => b.clicks - a.clicks);
+    const linhas: LinhaOferta[] = offers.map((o) => {
+      const revenue = o.conversions.reduce((sum, c) => sum + Number(c.commissionBrl), 0);
+      const clicks = o.shortLink?.clickCount ?? 0;
+      return {
+        id: o.id,
+        title: o.product.title,
+        imageUrl: o.product.imageUrl,
+        platform: o.product.platform,
+        price: num(o.price) ?? 0,
+        discountPct: num(o.discountPct) ?? 0,
+        score: o.score,
+        sentAt: o.sentAt,
+        clicks,
+        orders: o.conversions.length,
+        revenue: Number(revenue.toFixed(2)),
+        conversionRate: clicks ? Number(((o.conversions.length / clicks) * 100).toFixed(1)) : 0,
+        pendente: ehPendente(o.conversions.map((c) => c.status)),
+      };
+    });
+
+    // Ordena o conjunto todo antes de fatiar: paginar primeiro daria a
+    // primeira pagina de uma ordem que ninguem pediu.
+    const ordenadas = ordenar(linhas, sort, dir);
+    const inicio = (page - 1) * POR_PAGINA;
+
+    return {
+      linhas: ordenadas.slice(inicio, inicio + POR_PAGINA),
+      total: ordenadas.length,
+      pageInfo: { page, porPagina: POR_PAGINA, hasNextPage: inicio + POR_PAGINA < ordenadas.length },
+    };
   });
 
   /**

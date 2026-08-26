@@ -1,31 +1,43 @@
 import { useState } from 'react';
 import { brl, STORE, type Offer } from '../api.js';
 
+interface Rotulos {
+  skip: string;
+  send: string;
+  sendBusy: string;
+}
+
+const ROTULOS_PADRAO: Rotulos = { skip: 'Pular', send: 'Enviar ao grupo', sendBusy: 'Enviando...' };
+
 interface Props {
   offer: Offer;
   /** Posicao dessa oferta na fila atual (1 = proxima a sair). */
   posicao: number;
   onSend: (id: string) => Promise<void>;
   onSkip: (id: string) => Promise<void>;
-  onEdit: (offer: Offer) => void;
+  /** Sem isso o card nao abre editor de mensagem -- usado na aba Manual, onde
+   *  a decisao e so mandar pra fila ou descartar. */
+  onEdit?: (offer: Offer) => void;
+  /** Troca o texto dos dois botoes de acao. Default e o vocabulario da Fila. */
+  rotulos?: Rotulos;
 }
 
 /** "+38 mil vendidos". Abaixo de mil, o numero cheio -- arredondar mentiria. */
-function vendidos(n: number | null): string | null {
+export function vendidos(n: number | null): string | null {
   if (!n || n < 1) return null;
   if (n < 1000) return `${n} vendidos`;
   return `+${Math.floor(n / 1000)} mil vendidos`;
 }
 
 /** Acima disso a prateleira ja provou que o produto sai. */
-const CAMPEAO = 5000;
+export const CAMPEAO = 5000;
 
 /**
  * Card da fila. E onde voce decide "manda ou pula", entao a hierarquia e:
  * foto, preco, quanto paga. A nota fica de canto -- ela ordena a fila, mas
  * quem decide olha o produto.
  */
-export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
+export function PriceTag({ offer, posicao, onSend, onSkip, onEdit, rotulos = ROTULOS_PADRAO }: Props) {
   const [busy, setBusy] = useState<'send' | 'skip' | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +60,11 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
   const desconto = offer.discountPct ? Math.round(offer.discountPct) : 0;
 
   return (
-    <article className="card" data-leaving={leaving}>
+    <article
+      className={`card${onEdit ? '' : ' card--estatico'}`}
+      data-leaving={leaving}
+      onClick={onEdit ? () => onEdit(offer) : undefined}
+    >
       <div className="card__well">
         {offer.product.imageUrl ? (
           <img src={offer.product.imageUrl} alt="" loading="lazy" />
@@ -70,7 +86,25 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
         </span>
         {(offer.product.soldCount ?? 0) >= CAMPEAO && <span className="card__selo">Mais vendido</span>}
 
-        <h3 className="card__titulo">{offer.product.title}</h3>
+        <h3 className="card__titulo">
+          {onEdit ? (
+            <button
+              type="button"
+              className="card__titulo-btn"
+              title="Ver e editar o texto da mensagem"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(offer);
+              }}
+            >
+              {offer.product.title}
+            </button>
+          ) : (
+            <span className="card__titulo-txt" title={offer.product.title}>
+              {offer.product.title}
+            </span>
+          )}
+        </h3>
 
         <div className="card__meta">
           {offer.product.rating ? (
@@ -107,23 +141,46 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
             um deslize de 2px pro lado errado manda a oferta pro grupo. */}
         <div className="card__acoes">
           <div className="card__botoes">
-            <button className="btn btn--ghost btn--alvo" disabled={busy !== null} onClick={() => void act('skip')}>
-              {busy === 'skip' ? '...' : 'Pular'}
+            <button
+              className="btn btn--ghost btn--alvo"
+              disabled={busy !== null}
+              onClick={(e) => {
+                e.stopPropagation();
+                void act('skip');
+              }}
+            >
+              {busy === 'skip' ? '...' : rotulos.skip}
             </button>
-            <button className="btn btn--alvo card__enviar" disabled={busy !== null} onClick={() => void act('send')}>
-              {busy === 'send' ? 'Enviando...' : 'Enviar ao grupo'}
+            <button
+              className="btn btn--alvo card__enviar"
+              disabled={busy !== null}
+              onClick={(e) => {
+                e.stopPropagation();
+                void act('send');
+              }}
+            >
+              {busy === 'send' ? rotulos.sendBusy : rotulos.send}
             </button>
           </div>
           <div className="card__links">
-            <button onClick={() => onEdit(offer)}>Ver texto</button>
-            <button onClick={() => setPorque((v) => !v)}>{porque ? 'Fechar' : 'Por quê?'}</button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setPorque((v) => !v);
+              }}
+            >
+              {porque ? 'Fechar' : 'Por quê?'}
+            </button>
           </div>
         </div>
 
         {/* A justificativa da nota so aparece sob demanda: ela e util quando
             voce duvida do card, e ruido nos outros 90% das vezes. */}
         {porque && (
-          <ul className="card__razoes">
+          // Para o clique aqui -- sem isso, ler ou selecionar uma razao
+          // dispara o onEdit do card inteiro, ja que o clique borbulha ate o
+          // <article>.
+          <ul className="card__razoes" onClick={(e) => e.stopPropagation()}>
             {offer.scoreReasons.map((r, i) => (
               <li key={i} data-neg={r.points < 0}>
                 <span>{r.detail}</span>

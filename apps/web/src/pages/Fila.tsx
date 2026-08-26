@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, brl, STORE, type Offer } from '../api.js';
 import { PriceTag } from '../components/PriceTag.js';
 
@@ -43,6 +43,26 @@ export function Fila() {
 
   const [editing, setEditing] = useState<Offer | null>(null);
   const [draft, setDraft] = useState('');
+  const editorRef = useRef<HTMLDivElement | null>(null);
+
+  // O editor nasce depois da prateleira de cards, entao clicar num card com
+  // a fila cheia nao move a tela sozinho -- sem isso parece que o clique nao
+  // fez nada.
+  useEffect(() => {
+    if (editing) editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [editing]);
+
+  /** Abre o editor de outro card -- avisa antes se ia descartar rascunho nao salvo. */
+  function abrirEditor(o: Offer) {
+    if (editing && draft !== editing.message) {
+      if (!confirm('Você tem texto editado sem salvar. Descartar e abrir outro card?')) return;
+    }
+    setEditing(o);
+    setDraft(o.message);
+  }
+
+  // Fechado por padrao: adicionar a mao e a excecao, ver a fila e a regra.
+  const [abrindoForm, setAbrindoForm] = useState(false);
 
   async function load(filtro = aba) {
     setLoading(true);
@@ -94,7 +114,12 @@ export function Fila() {
     setError(null);
     try {
       const offer = await api.post<Offer>('/api/offers', { url: url.trim(), note: note.trim() || undefined });
-      setOffers((prev) => [offer, ...prev]);
+      // a rota pode devolver oferta que ja esta na lista, entao substitui em vez de empilhar
+      setOffers((prev) =>
+        prev.some((o) => o.id === offer.id)
+          ? prev.map((o) => (o.id === offer.id ? offer : o))
+          : [offer, ...prev],
+      );
       setUrl('');
       setNote('');
     } catch (err) {
@@ -121,7 +146,12 @@ export function Fila() {
       platform: item.platform,
       externalId: item.externalId,
     });
-    setOffers((prev) => [offer, ...prev]);
+    // a rota pode devolver oferta que ja esta na lista, entao substitui em vez de empilhar
+    setOffers((prev) =>
+      prev.some((o) => o.id === offer.id)
+        ? prev.map((o) => (o.id === offer.id ? offer : o))
+        : [offer, ...prev],
+    );
   }
 
   /** Tira a oferta da lista e corrige o contador da aba sem recarregar tudo. */
@@ -235,96 +265,111 @@ export function Fila() {
       {error && <div className="notice">{error}</div>}
       {aviso && <div className="notice" data-tone="warn">{aviso}</div>}
 
-      <div className="panel panel--hero">
-        <h2 className="panel__title">Adicionar oferta</h2>
-        <div className="row">
-          <div className="field" style={{ flex: '2 1 340px' }}>
-            <label htmlFor="url">Cole o link do produto</label>
-            <input
-              id="url"
-              value={url}
-              placeholder="https://www.amazon.com.br/dp/..."
-              onChange={(e) => setUrl(e.target.value)}
-            />
-          </div>
-          <div className="field" style={{ flex: '1 1 220px' }}>
-            <label htmlFor="note">Comentário seu (opcional)</label>
-            <input
-              id="note"
-              value={note}
-              placeholder="Estoque baixo, corre"
-              onChange={(e) => setNote(e.target.value)}
-            />
-          </div>
-          <button className="btn" disabled={!url.trim() || adding} onClick={() => void addUrl()}>
-            {adding ? 'Buscando...' : 'Capturar'}
-          </button>
-        </div>
+      <div className="panel">
+        <button
+          type="button"
+          className="acordeao"
+          aria-expanded={abrindoForm}
+          onClick={() => setAbrindoForm((v) => !v)}
+        >
+          <span className="acordeao__seta" data-aberto={abrindoForm} aria-hidden="true">
+            ▸
+          </span>
+          Adicionar oferta
+        </button>
 
-        <div className="row" style={{ marginTop: 18 }}>
-          <div className="field" style={{ flex: '2 1 340px' }}>
-            <label htmlFor="term">Ou garimpe agora nas lojas conectadas</label>
-            <input
-              id="term"
-              value={term}
-              placeholder="air fryer 5 litros"
-              onChange={(e) => setTerm(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && term.trim().length > 1 && void search()}
-            />
-          </div>
-          <button className="btn btn--ghost" disabled={term.trim().length < 2 || searching} onClick={() => void search()}>
-            {searching ? 'Procurando...' : 'Procurar'}
-          </button>
-        </div>
+        {abrindoForm && (
+          <div className="acordeao__corpo">
+            <div className="row">
+              <div className="field" style={{ flex: '2 1 340px' }}>
+                <label htmlFor="url">Cole o link do produto</label>
+                <input
+                  id="url"
+                  value={url}
+                  placeholder="https://www.amazon.com.br/dp/..."
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </div>
+              <div className="field" style={{ flex: '1 1 220px' }}>
+                <label htmlFor="note">Comentário seu (opcional)</label>
+                <input
+                  id="note"
+                  value={note}
+                  placeholder="Estoque baixo, corre"
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </div>
+              <button className="btn" disabled={!url.trim() || adding} onClick={() => void addUrl()}>
+                {adding ? 'Buscando...' : 'Capturar'}
+              </button>
+            </div>
 
-        {found && (
-          <table className="table" style={{ marginTop: 16 }}>
-            <thead>
-              <tr>
-                <th>Produto</th>
-                <th className="num">Preço</th>
-                <th className="num">Comissão</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {found.filter((f) => !f.ok).map((f, i) => (
-                <tr key={`err-${i}`}>
-                  <td colSpan={4} style={{ color: 'var(--muted)', fontSize: 13 }}>
-                    {STORE[f.platform]}: {f.error}
-                  </td>
-                </tr>
-              ))}
-              {found.filter((f) => f.ok).map((f) => (
-                <tr key={`${f.platform}-${f.externalId}`}>
-                  <td>
-                    <div className="cell-product">
-                      {f.imageUrl && <img src={f.imageUrl} alt="" loading="lazy" />}
-                      <span>
-                        {f.title}
-                        <br />
-                        <small style={{ color: 'var(--muted)' }}>{STORE[f.platform]}</small>
-                      </span>
-                    </div>
-                  </td>
-                  <td className="num">{brl(f.price)}</td>
-                  <td className="num">{f.commissionPct ? `${f.commissionPct.toFixed(1)}%` : '—'}</td>
-                  <td className="num">
-                    <button className="btn btn--ghost btn--sm" onClick={() => void queueFound(f)}>
-                      Pra fila
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {found.filter((f) => f.ok).length === 0 && (
-                <tr>
-                  <td colSpan={4} style={{ color: 'var(--muted)' }}>
-                    Nenhum produto voltou dessa busca.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+            <div className="row" style={{ marginTop: 18 }}>
+              <div className="field" style={{ flex: '2 1 340px' }}>
+                <label htmlFor="term">Ou garimpe agora nas lojas conectadas</label>
+                <input
+                  id="term"
+                  value={term}
+                  placeholder="air fryer 5 litros"
+                  onChange={(e) => setTerm(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && term.trim().length > 1 && void search()}
+                />
+              </div>
+              <button className="btn btn--ghost" disabled={term.trim().length < 2 || searching} onClick={() => void search()}>
+                {searching ? 'Procurando...' : 'Procurar'}
+              </button>
+            </div>
+
+            {found && (
+              <table className="table" style={{ marginTop: 16 }}>
+                <thead>
+                  <tr>
+                    <th>Produto</th>
+                    <th className="num">Preço</th>
+                    <th className="num">Comissão</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {found.filter((f) => !f.ok).map((f, i) => (
+                    <tr key={`err-${i}`}>
+                      <td colSpan={4} style={{ color: 'var(--muted)', fontSize: 13 }}>
+                        {STORE[f.platform]}: {f.error}
+                      </td>
+                    </tr>
+                  ))}
+                  {found.filter((f) => f.ok).map((f) => (
+                    <tr key={`${f.platform}-${f.externalId}`}>
+                      <td>
+                        <div className="cell-product">
+                          {f.imageUrl && <img src={f.imageUrl} alt="" loading="lazy" />}
+                          <span>
+                            {f.title}
+                            <br />
+                            <small style={{ color: 'var(--muted)' }}>{STORE[f.platform]}</small>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="num">{brl(f.price)}</td>
+                      <td className="num">{f.commissionPct ? `${f.commissionPct.toFixed(1)}%` : '—'}</td>
+                      <td className="num">
+                        <button className="btn btn--ghost btn--sm" onClick={() => void queueFound(f)}>
+                          Pra fila
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {found.filter((f) => f.ok).length === 0 && (
+                    <tr>
+                      <td colSpan={4} style={{ color: 'var(--muted)' }}>
+                        Nenhum produto voltou dessa busca.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            )}
+          </div>
         )}
       </div>
 
@@ -384,17 +429,14 @@ export function Fila() {
                 posicao={posicao}
                 onSend={send}
                 onSkip={skip}
-                onEdit={(o) => {
-                  setEditing(o);
-                  setDraft(o.message);
-                }}
+                onEdit={abrirEditor}
               />
             ))}
         </div>
       )}
 
       {editing && (
-        <div className="panel" style={{ marginTop: 20 }}>
+        <div className="panel" style={{ marginTop: 20 }} ref={editorRef}>
           <h2 className="panel__title">Texto que vai pro grupo</h2>
           <textarea rows={12} value={draft} onChange={(e) => setDraft(e.target.value)} />
           <div className="row" style={{ marginTop: 12 }}>

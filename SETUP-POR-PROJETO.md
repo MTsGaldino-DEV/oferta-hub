@@ -7,9 +7,14 @@
 > prontos pra copiar. Não é necessário ter o repositório
 > `vibe-coding-toolkit` por perto.
 >
-> Pré-requisito: a instalação global (Claude Code + Superpowers + Ponytail
-> + Caveman) já feita na máquina — ver `INSTALACAO-GLOBAL.md`. Ela não
-> precisa ser repetida aqui; plugins são globais, não por-projeto.
+> Pré-requisito: a instalação global já feita na máquina — ver
+> `INSTALACAO-GLOBAL.md`. Isso inclui Superpowers, Ponytail, Caveman, mais
+> um conjunto maior de plugins/skills/MCP servers (Context7, Chrome
+> DevTools MCP, aia-harness, ui-ux-pro-max, as Skills oficiais da
+> Anthropic, Graphify, agent-browser). Nada disso precisa ser reinstalado
+> por projeto — está ativo em toda sessão, em qualquer pasta. Ver seção
+> "Ferramentas globais já disponíveis" mais abaixo pra saber o que cada
+> uma faz e quando ela entra em ação sozinha.
 
 ---
 
@@ -300,13 +305,65 @@ Se sim, crie `MEMORY.md` na raiz com este esqueleto:
 
 E crie a pasta `memory/` vazia (ou com um `.gitkeep`) ao lado.
 
-### Passo 6 — Relatório final
+### Passo 6 — Pergunte se o projeto quer indexação com Graphify (opcional)
+
+O binário `graphify` já está instalado globalmente. Indexar um projeto
+específico é uma ação por-projeto, separada da instalação — só faz
+sentido pra projeto de porte médio/grande, onde vale a pena responder "o
+que quebra se eu mudar isso" sem grep exploratório. Se o usuário confirmar
+que sim:
+
+```bash
+graphify extract .
+```
+
+Isso cria `graphify-out/` (grafo HTML, JSON, e um relatório em texto) na
+raiz do projeto. Opcionalmente, ofereça também conectar o hook de
+orientação **só a este projeto** (nunca use `graphify install` sem
+`--project` aqui — isso mudaria o comportamento de toda sessão em todo
+projeto, uma decisão maior demais pra este passo):
+
+```bash
+graphify install --project
+```
+
+Se o usuário não souber decidir, pule este passo — Graphify funciona
+igual bem instalado depois, quando a dor de navegar um projeto grande
+aparecer de verdade.
+
+### Passo 7 — Pergunte se o projeto quer memória de longo prazo via Obsidian (opcional, avançado)
+
+Diferente dos passos anteriores, isto **não é autocontido** — exige duas
+decisões pessoais que este arquivo não pode tomar por conta própria:
+qual servidor MCP de Obsidian usar (não existe um "oficial" recomendado —
+busque "obsidian" num registro de MCP) e onde fica o vault. Só ofereça
+este passo se o usuário já sentiu a dor de `MEMORY.md` (Passo 5) ficando
+grande demais, ou pedir explicitamente. Se confirmado, o roteiro é:
+
+1. Criar `vault/{01-projetos,02-areas,03-conhecimento,04-referencia,daily,templates}`.
+2. Escrever um modelo (frontmatter + seções obrigatórias) por pasta em `vault/templates/`.
+3. Instalar e configurar o servidor MCP escolhido, apontando pra `vault/`.
+4. Escrever um hook `PreToolUse` que bloqueia `Read`/`Grep`/`Glob`/`Write`/`Edit`
+   direto em `vault/` (exceto leitura de `vault/daily/`), forçando toda
+   escrita a passar pelas ferramentas MCP — sem isso a validação de
+   frontmatter/modelo/link não é garantida.
+5. Testar os dois caminhos: criar uma nota via MCP (deve funcionar) e
+   tentar ler o arquivo direto (deve ser bloqueado pelo hook).
+
+Detalhe completo, incluindo o hook pronto pra copiar e o exemplo de nota
+válida vs. rejeitada, em `docs/tools/08-obsidian-memory.md` do
+`vibe-coding-toolkit` (única exceção neste arquivo que não é 100%
+autocontida, porque a escolha de servidor MCP é sua, não algo que dá pra
+cravar num template genérico).
+
+### Passo 8 — Relatório final
 
 Depois de criar os arquivos, liste pro usuário exatamente o que foi
 criado, o que foi pulado (e por quê — ex.: `CLAUDE.md` já existia), e
-lembre que os plugins (Superpowers/Ponytail/Caveman) já estão ativos
-globalmente — nenhuma ação extra necessária pra eles funcionarem neste
-projeto.
+lembre que todo o conjunto global (Superpowers/Ponytail/Caveman, Context7,
+Chrome DevTools MCP, aia-harness, ui-ux-pro-max, Skills oficiais,
+agent-browser) já está ativo — nenhuma ação extra necessária pra eles
+funcionarem neste projeto.
 
 ---
 
@@ -340,6 +397,26 @@ tabela inteira no `CLAUDE.md`.
 | `documentation-writer` | READMEs, documentação de API, runbooks — escritos ou atualizados sob pedido. |
 | `penetration-tester` | Técnicas simuladas de ataque contra um fluxo de autenticação real ou um release. |
 | `security-auditor` | Revisão de defesa em profundidade e modelagem de ameaças antes de um lançamento importante. |
+
+## Ferramentas globais já disponíveis (referência)
+
+Já instaladas na máquina, ativas em qualquer projeto, sem nenhuma ação
+extra por-projeto. Só listado aqui pra saber o que esperar — não recrie
+nada disso nos passos acima.
+
+| Ferramenta | O que faz | Como entra em ação |
+|---|---|---|
+| Superpowers | Disciplina brainstorm → plano → implementação → revisão | Sozinha, em qualquer pedido ambíguo ou criativo |
+| Ponytail | Escada anti-over-engineering (stdlib > nativo > dependência já instalada > 1 linha) | Sozinha, antes de qualquer código novo |
+| Caveman | Corta enrolação da prosa do agente, sem perder informação | Sozinha, em toda resposta |
+| Context7 | Injeta documentação real e atual de biblioteca no contexto | Sozinha, quando a pergunta depende de API/versão específica |
+| Chrome DevTools MCP | Diagnóstico de página real rodando (performance, console, rede) | Sob pedido — "por que essa página está lenta/quebrada" |
+| aia-harness | `/aia-harness:init` monta CLAUDE.md/agentes/hooks escaneando o projeto | Só quando você digita o comando |
+| ui-ux-pro-max | Skill de design de UI/UX | Sob pedido de design de interface |
+| document-skills | Gera/edita `.docx`/`.pdf`/`.pptx`/`.xlsx` de verdade | Sob pedido de documento |
+| example-skills | `skill-creator`, `mcp-builder`, `web-artifacts-builder`, `webapp-testing`, e mais | Sob pedido, cada uma pela própria descrição |
+| Graphify | Grafo de conhecimento do código (indexação é por-projeto — Passo 6) | `graphify query "..."` depois de indexado |
+| agent-browser | Automação de navegador nativa pra agentes (`@e1`, `@e2`...) | Sob pedido — testar um fluxo de UI de ponta a ponta |
 
 ## Depois do setup — o fluxo do dia a dia
 

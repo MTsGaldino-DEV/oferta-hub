@@ -6,5 +6,5 @@ apps/api/auth_state/
 apps/api/prisma/dev.db*
 .env.ml
 *.tsbuildinfo
+graphify-out/
 Inspiração - Achadinho Pro/
-achadinho-pro/

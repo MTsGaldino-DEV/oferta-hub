@@ -1,25 +1,6 @@
-/* Botão flutuante. Amarelo da marca sobre tinta escura, canto inferior direito
-   — longe do "Comprar agora" do ML, que fica na coluna da direita mais acima. */
-#hubofertas-btn {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 2147483000;
-  background: #16171a;
-  color: #ffe01b;
-  border: 2px solid #ffe01b;
-  border-radius: 6px;
-  padding: 11px 16px;
-  font: 600 14px/1.2 system-ui, sans-serif;
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
-}
-
-#hubofertas-btn:hover { background: #23252a; }
-#hubofertas-btn:disabled { opacity: 0.6; cursor: wait; }
-
-/* Painel de afiliado (hub): mesmo wrapper de #hubofertas-btn, so que
-   preparado pra empilhar mais de um botao se precisar de novo. */
+/* Painel de afiliado (hub): wrapper que empilha os botoes de captura em massa.
+   O widget de captura comum nao esta aqui -- ele vive no Shadow DOM
+   (shared.js), fora do alcance do CSS da loja. */
 #hubofertas-btns {
   position: fixed;
   right: 20px;
@@ -44,21 +25,3 @@
 
 .hubofertas-btn-hub:hover { background: #23252a; }
 .hubofertas-btn-hub:disabled { opacity: 0.6; cursor: wait; }
-
-#hubofertas-aviso {
-  position: fixed;
-  right: 20px;
-  bottom: 130px;
-  z-index: 2147483000;
-  display: none;
-  max-width: 320px;
-  background: #16171a;
-  color: #fff;
-  border-left: 4px solid #ffe01b;
-  border-radius: 4px;
-  padding: 11px 14px;
-  font: 500 13px/1.45 system-ui, sans-serif;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
-}
-
-#hubofertas-aviso[data-tom='erro'] { border-left-color: #ff5c47; }

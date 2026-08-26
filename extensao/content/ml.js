@@ -22,7 +22,40 @@
   // utilidades
   // ------------------------------------------------------------------
 
-  const texto = (el) => (el ? (el.textContent || '').trim() : '');
+  const H = window.__HUB;
+  if (!H) return; // shared.js nao carregou -- sem ele nada aqui funciona
+
+  // Este arquivo carrega em todos os dominios do manifest (evita manter um
+  // bloco de content_scripts por loja); daqui pra baixo so roda no ML.
+  //
+  // O guard nao e so economia: sem ele, o listener de 'raspar' la embaixo
+  // tambem se registra na Amazon, e como ml.js vem antes no manifest ele
+  // responde PRIMEIRO -- com lista vazia, porque nenhum seletor do ML casa.
+  // O `responder()` que vale e o primeiro; a resposta de verdade do amazon.js
+  // seria descartada, e o painel mostraria "nenhum produto" numa pagina cheia.
+  if (!/(^|\.)mercadoli(vre|bre)\.com(\.br)?$/i.test(window.location.hostname)) return;
+
+  const { texto, lerVendidos, extrairMelhorImagem, registrar } = H;
+
+  /**
+   * Ruido de preco do ML: parcela, frete e "ou R$ X em outros meios" nao sao o
+   * preco do produto. O erro mais caro da vitrine e a parcela -- num controle
+   * de R$ 406,43 em "12x R$ 39,30", pegar o menor numero anuncia R$ 39,30 e
+   * 94% OFF, preco mentiroso no grupo, e o grupo e o ativo que nao da pra
+   * reconstruir.
+   */
+  const RUIDO_ML = [
+    '.poly-price__installments',
+    '.ui-search-installments',
+    '.ui-search-item__group--installments',
+    '.ui-pdp-price__subtitles',
+    '.poly-component__shipping',
+    '.ui-search-item__shipping',
+    '.poly-price__other-payment',
+    '.ui-search-price__other-payment',
+  ].join(', ');
+
+  const lerPrecos = (raiz) => H.lerPrecos(raiz, { seletoresRuido: RUIDO_ML });
 
   /**
    * Mesmo formato/chave do lib/log.js (service worker e painel), mas
@@ -110,99 +143,6 @@
     }
 
     return wid ? porWid() : null;
-  }
-
-  /**
-   * Le um bloco .andes-money-amount em centavos.
-   *
-   * Reais e centavos vivem em spans separados: ler so a fracao transformaria
-   * R$ 729,99 em R$ 729,00. E a fracao vem com ponto de milhar ("1.099").
-   */
-  function lerDinheiro(raiz) {
-    if (!raiz) return null;
-    const fracao = raiz.querySelector('.andes-money-amount__fraction');
-    const digitos = texto(fracao).replace(/\D/g, '');
-    if (!digitos) return null;
-    const reais = parseInt(digitos, 10);
-    if (!Number.isFinite(reais) || reais <= 0) return null;
-    const centavosEl = raiz.querySelector('.andes-money-amount__cents');
-    const cd = texto(centavosEl).replace(/\D/g, '');
-    return reais + (cd ? parseInt(cd.slice(0, 2), 10) : 0) / 100;
-  }
-
-  /** "+10mil vendidos", "Mais de 50 mil vendidos", "1.234 vendidos" -> numero. */
-  function lerVendidos(str) {
-    const t = String(str || '').toLowerCase();
-    const m = t.match(/(\d[\d.,]*)\s*(mil|mi)?\s*\+?\s*vendid/);
-    if (!m) return undefined;
-    const base = parseFloat(m[1].replace(/\./g, '').replace(',', '.'));
-    if (!Number.isFinite(base)) return undefined;
-    if (m[2] === 'mil') return Math.round(base * 1000);
-    if (m[2] === 'mi') return Math.round(base * 1_000_000);
-    return Math.round(base);
-  }
-
-  // ------------------------------------------------------------------
-  // preco: escolher por PAPEL, nunca pelo tamanho do numero
-  // ------------------------------------------------------------------
-
-  /**
-   * Blocos de dinheiro que NAO sao o preco do produto.
-   *
-   * O erro mais caro da vitrine e a parcela. Num controle de R$ 406,43 em
-   * "12x R$ 39,30", pegar o menor numero do card anuncia R$ 39,30 e 94% OFF --
-   * preco mentiroso no grupo, e o grupo e o ativo que nao da pra reconstruir.
-   * Frete e "ou R$ 47,90 em outros meios" entram na mesma lista.
-   */
-  const RUIDO_DE_PRECO = [
-    '.poly-price__installments',
-    '.ui-search-installments',
-    '.ui-search-item__group--installments',
-    '.ui-pdp-price__subtitles',
-    '.poly-component__shipping',
-    '.ui-search-item__shipping',
-    '.poly-price__other-payment',
-    '.ui-search-price__other-payment',
-  ].join(', ');
-
-  /**
-   * Parcela sem classe conhecida. As classes do ML mudam sem aviso, entao a
-   * forma tambem conta: o container da parcela comeca com "12x".
-   */
-  function pareceParcela(el) {
-    let no = el.parentElement;
-    for (let i = 0; i < 3 && no; i++, no = no.parentElement) {
-      if (/^\s*\d{1,2}\s*x\b/i.test(no.textContent || '')) return true;
-    }
-    return false;
-  }
-
-  const ehRiscado = (el) =>
-    el.matches('s, del, .andes-money-amount--previous') || !!el.closest('s, del');
-
-  /**
-   * Preco atual e preco cheio, de um card ou de uma pagina de produto.
-   *
-   * Nao usa min/max sobre os numeros da caixa -- foi assim que a parcela virou
-   * preco. Separa por papel: riscado e o cheio, e o primeiro nao-riscado que
-   * sobra depois do ruido e o atual.
-   */
-  function lerPrecos(raiz) {
-    if (!raiz) return {};
-
-    const blocos = [...raiz.querySelectorAll('.andes-money-amount')].filter(
-      (el) => !el.closest(RUIDO_DE_PRECO) && !pareceParcela(el),
-    );
-
-    const price = lerDinheiro(blocos.find((el) => !ehRiscado(el)));
-    const listPrice = lerDinheiro(blocos.find(ehRiscado));
-
-    return {
-      price: price || undefined,
-      // So conta como "de" se for maior: vendedor as vezes repete o mesmo
-      // numero nos dois campos, e isso viraria um desconto de 0%.
-      listPrice: listPrice && price && listPrice > price ? listPrice : undefined,
-    };
   }
 
   // ------------------------------------------------------------------
@@ -307,14 +247,13 @@
       if (!titulo) continue;
 
       const { price, listPrice } = lerPrecos(card);
-      const img = card.querySelector('img');
 
       achados.push({
         platform: 'MERCADO_LIVRE',
         externalId: ref.externalId,
         title: titulo,
         canonicalUrl: ref.url,
-        imageUrl: (img && (img.getAttribute('data-src') || img.src)) || undefined,
+        imageUrl: extrairMelhorImagem(card),
         price,
         listPrice,
         soldCount: lerVendidos(texto(card)),
@@ -372,7 +311,6 @@
       }
 
       const digitos = id.slice(3);
-      const img = card.querySelector('img');
       const rect = card.getBoundingClientRect();
 
       achados.push({
@@ -380,7 +318,7 @@
         externalId: `MLB${digitos}`,
         title: titulo,
         canonicalUrl: jm(digitos),
-        imageUrl: (img && (img.getAttribute('data-src') || img.src)) || undefined,
+        imageUrl: extrairMelhorImagem(card),
         price,
         listPrice,
         soldCount: lerVendidos(texto(card)),
@@ -470,60 +408,6 @@
   // botao flutuante
   // ------------------------------------------------------------------
 
-  function avisar(texto, tom) {
-    let el = document.getElementById('hubofertas-aviso');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'hubofertas-aviso';
-      document.body.appendChild(el);
-    }
-    el.textContent = texto;
-    el.dataset.tom = tom || 'ok';
-    el.style.display = 'block';
-    clearTimeout(el._t);
-    el._t = setTimeout(() => (el.style.display = 'none'), 5000);
-    void registrarLog(tom === 'erro' ? 'erro' : 'info', texto);
-  }
-
-  async function enviar(produtos, botao) {
-    if (!produtos.length) {
-      avisar('Não encontrei produto nesta página.', 'erro');
-      return;
-    }
-    const rotulo = botao.textContent;
-    botao.disabled = true;
-    botao.textContent = 'Enviando...';
-    try {
-      const r = await chrome.runtime.sendMessage({ tipo: 'capturar', produtos });
-      if (!r?.ok) throw new Error(r?.error || 'falhou');
-      const partes = [`${r.criados} na fila`];
-      if (r.repetidos) partes.push(`${r.repetidos} já estavam`);
-      if (r.semLink) partes.push(`${r.semLink} sem link de afiliado`);
-      // O motivo da falha vai para o console inteiro: no aviso nao cabe, e sem
-      // ele so sobra o status HTTP, que nao diz nada.
-      if (r.avisoLink) console.warn('[Hub Ofertas] link de afiliado:', r.avisoLink);
-      avisar(
-        `Hub Ofertas: ${partes.join(', ')}.${r.avisoLink ? ' Veja o console para o motivo.' : ''}`,
-        r.semLink ? 'erro' : 'ok',
-      );
-    } catch (e) {
-      // "Extension context invalidated" nao e bug: acontece toda vez que a
-      // extensao e recarregada em chrome://extensions com esta aba ja
-      // aberta -- o script daqui fica orfao, sem conexao com a extensao
-      // reiniciada. So um F5 nesta pagina resolve.
-      const orfao = /context invalidated/i.test(e.message || '');
-      avisar(
-        orfao
-          ? 'Hub Ofertas: a extensão foi recarregada. Dê um F5 nesta página e tente de novo.'
-          : `Hub Ofertas: ${e.message}`,
-        'erro',
-      );
-    } finally {
-      botao.disabled = false;
-      botao.textContent = rotulo;
-    }
-  }
-
   /**
    * Um dos dois botoes do hub: com desconto minimo, ou sem filtro nenhum.
    * So CAPTURA e guarda em chrome.storage.local -- nunca manda pro Hub
@@ -551,7 +435,6 @@
 
         if (!produtos.length) {
           void registrarLog('aviso', `${tag}não achei nenhum produto que servisse.`);
-          avisar('Hub Ofertas: não achei nenhum produto nessa busca.', 'erro');
           return;
         }
         if (produtos.length < ALVO_PRODUTOS) {
@@ -565,13 +448,8 @@
 
         await chrome.storage.local.set({ captura_pendente: { produtos, criadoEm: Date.now() } });
         void registrarLog('info', `${tag}${produtos.length} produto(s) guardado(s) -- nada foi enviado ainda.`);
-        avisar(
-          `Hub Ofertas: ${produtos.length} produto(s) prontos. Abra o painel lateral, revise e clique "Enviar ao Hub".`,
-          'ok',
-        );
       } catch (e) {
         void registrarLog('erro', `${tag}captura travou: ${e.message}${e.stack ? `\n${e.stack}` : ''}`);
-        avisar(`Hub Ofertas: a captura travou (${e.message}). Veja a aba de logs.`, 'erro');
       } finally {
         botao.disabled = false;
         botao.textContent = rotuloOriginal;
@@ -581,7 +459,7 @@
   }
 
   function montarBotao() {
-    if (document.getElementById('hubofertas-btn') || document.getElementById('hubofertas-btns')) return;
+    if (document.getElementById('hubofertas-widget') || document.getElementById('hubofertas-btns')) return;
 
     const pdp = ehPdp();
     const hub = !pdp && ehHub();
@@ -598,14 +476,33 @@
       return;
     }
 
-    const botao = document.createElement('button');
-    botao.id = 'hubofertas-btn';
-    botao.textContent = pdp ? 'Mandar pro Hub' : 'Capturar esta busca';
-    botao.addEventListener('click', () => {
-      const produtos = pdp ? [capturarPdp()].filter(Boolean) : capturarListagemDoDom();
-      void enviar(produtos, botao);
+    H.montarWidget({
+      loja: 'Mercado Livre',
+      rotulo: pdp ? 'Capturar produto' : 'Capturar esta busca',
+      async aoCapturar({ progresso, pronto, erro }) {
+        // PDP e uma leitura so; listagem rola a pagina acumulando, porque a
+        // grade do ML e virtualizada e o que sai da vista some do DOM.
+        const produtos = pdp
+          ? [capturarPdp()].filter(Boolean)
+          : await H.rolarAcumulando(
+              (acc) => {
+                for (const p of capturarListagemDoDom()) {
+                  registrar(acc, p.externalId, () => p);
+                }
+                return acc.produtos.size;
+              },
+              { aoProgredir: progresso },
+            );
+
+        if (!produtos.length) {
+          erro('Não encontrei produto nesta página.');
+          return;
+        }
+        await chrome.storage.local.set({ captura_pendente: { produtos, criadoEm: Date.now() } });
+        void registrarLog('info', `${produtos.length} produto(s) capturado(s) do ML -- nada foi enviado ainda.`);
+        pronto(produtos.length);
+      },
     });
-    document.body.appendChild(botao);
   }
 
   // A listagem do ML troca de conteudo sem recarregar a pagina, entao o botao

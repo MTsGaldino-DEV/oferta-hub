@@ -52,7 +52,7 @@ const serialize = (o: any) => ({
 });
 
 export async function offerRoutes(app: FastifyInstance) {
-  /** Fila de curadoria, ordenada pela nota -- exceto captura do ML pela extensao. */
+  /** Fila de curadoria, ordenada pela nota. */
   app.get<{ Querystring: { status?: OfferStatus; limit?: string; nicheId?: string } }>(
     '/api/offers',
     async (req) => {
@@ -71,27 +71,13 @@ export async function offerRoutes(app: FastifyInstance) {
       return offers.map(serialize);
     }
 
-    // A extensao ja captura na ordem de relevancia do ML -- reordenar pela
-    // nota so embaralha o que ja veio pronto. Essas ficam por ordem de
-    // captura, no topo; o resto da fila continua pela nota.
-    const [capturaExtensao, resto] = await Promise.all([
-      prisma.offer.findMany({
-        where: { ...where, source: OfferSource.MANUAL, product: { platform: Platform.MERCADO_LIVRE } },
-        include,
-        orderBy: { createdAt: 'asc' },
-        take,
-      }),
-      prisma.offer.findMany({
-        where: {
-          ...where,
-          NOT: { source: OfferSource.MANUAL, product: { platform: Platform.MERCADO_LIVRE } },
-        },
-        include,
-        orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
-        take,
-      }),
-    ]);
-    return [...capturaExtensao, ...resto].slice(0, take).map(serialize);
+    const offers = await prisma.offer.findMany({
+      where,
+      include,
+      orderBy: [{ score: 'desc' }, { createdAt: 'desc' }],
+      take,
+    });
+    return offers.map(serialize);
     },
   );
 
@@ -306,6 +292,17 @@ export async function offerRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { id: string } }>('/api/offers/:id/skip', async (req) => {
     await prisma.offer.update({ where: { id: req.params.id }, data: { status: OfferStatus.SKIPPED } });
+    return { ok: true };
+  });
+
+  /** Promove da revisao da aba Manual (SCANNED) pra Fila normal (PENDING). */
+  app.post<{ Params: { id: string } }>('/api/offers/:id/promover', async (req, reply) => {
+    const offer = await prisma.offer.findUnique({ where: { id: req.params.id } });
+    if (!offer) return reply.code(404).send({ error: 'Oferta nao encontrada.' });
+    if (offer.status !== OfferStatus.SCANNED) {
+      return reply.code(400).send({ error: 'Essa oferta ja saiu da revisao da aba Manual.' });
+    }
+    await prisma.offer.update({ where: { id: offer.id }, data: { status: OfferStatus.PENDING } });
     return { ok: true };
   });
 }
