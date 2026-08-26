@@ -1,13 +1,25 @@
 import { useState } from 'react';
 import { brl, STORE, type Offer } from '../api.js';
 
+interface Rotulos {
+  skip: string;
+  send: string;
+  sendBusy: string;
+}
+
+const ROTULOS_PADRAO: Rotulos = { skip: 'Pular', send: 'Enviar ao grupo', sendBusy: 'Enviando...' };
+
 interface Props {
   offer: Offer;
   /** Posicao dessa oferta na fila atual (1 = proxima a sair). */
   posicao: number;
   onSend: (id: string) => Promise<void>;
   onSkip: (id: string) => Promise<void>;
-  onEdit: (offer: Offer) => void;
+  /** Sem isso o card nao abre editor de mensagem -- usado na aba Manual, onde
+   *  a decisao e so mandar pra fila ou descartar. */
+  onEdit?: (offer: Offer) => void;
+  /** Troca o texto dos dois botoes de acao. Default e o vocabulario da Fila. */
+  rotulos?: Rotulos;
 }
 
 /** "+38 mil vendidos". Abaixo de mil, o numero cheio -- arredondar mentiria. */
@@ -25,7 +37,7 @@ export const CAMPEAO = 5000;
  * foto, preco, quanto paga. A nota fica de canto -- ela ordena a fila, mas
  * quem decide olha o produto.
  */
-export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
+export function PriceTag({ offer, posicao, onSend, onSkip, onEdit, rotulos = ROTULOS_PADRAO }: Props) {
   const [busy, setBusy] = useState<'send' | 'skip' | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,9 +61,9 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
 
   return (
     <article
-      className="card"
+      className={`card${onEdit ? '' : ' card--estatico'}`}
       data-leaving={leaving}
-      onClick={() => onEdit(offer)}
+      onClick={onEdit ? () => onEdit(offer) : undefined}
     >
       <div className="card__well">
         {offer.product.imageUrl ? (
@@ -75,17 +87,23 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
         {(offer.product.soldCount ?? 0) >= CAMPEAO && <span className="card__selo">Mais vendido</span>}
 
         <h3 className="card__titulo">
-          <button
-            type="button"
-            className="card__titulo-btn"
-            title="Ver e editar o texto da mensagem"
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdit(offer);
-            }}
-          >
-            {offer.product.title}
-          </button>
+          {onEdit ? (
+            <button
+              type="button"
+              className="card__titulo-btn"
+              title="Ver e editar o texto da mensagem"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(offer);
+              }}
+            >
+              {offer.product.title}
+            </button>
+          ) : (
+            <span className="card__titulo-txt" title={offer.product.title}>
+              {offer.product.title}
+            </span>
+          )}
         </h3>
 
         <div className="card__meta">
@@ -131,7 +149,7 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
                 void act('skip');
               }}
             >
-              {busy === 'skip' ? '...' : 'Pular'}
+              {busy === 'skip' ? '...' : rotulos.skip}
             </button>
             <button
               className="btn btn--alvo card__enviar"
@@ -141,7 +159,7 @@ export function PriceTag({ offer, posicao, onSend, onSkip, onEdit }: Props) {
                 void act('send');
               }}
             >
-              {busy === 'send' ? 'Enviando...' : 'Enviar ao grupo'}
+              {busy === 'send' ? rotulos.sendBusy : rotulos.send}
             </button>
           </div>
           <div className="card__links">
