@@ -71,12 +71,13 @@ let itens = [];
 const LOJAS = [
   { teste: /(^|\/\/)([^/]*\.)?mercadoli(vre|bre)\.com(\.br)?\//i, nome: 'Mercado Livre' },
   { teste: /(^|\/\/)([^/]*\.)?amazon\.com\.br\//i, nome: 'Amazon' },
+  { teste: /(^|\/\/)([^/]*\.)?shopee\.com\.br\//i, nome: 'Shopee' },
 ];
 
 const ehPaginaSuportada = (url) => LOJAS.some((l) => l.teste.test(url || ''));
 
 /** Enum do backend -> nome que o humano reconhece. */
-const NOME_LOJA = { MERCADO_LIVRE: 'Mercado Livre', AMAZON: 'Amazon' };
+const NOME_LOJA = { MERCADO_LIVRE: 'Mercado Livre', AMAZON: 'Amazon', SHOPEE: 'Shopee' };
 
 async function abaAtiva() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
