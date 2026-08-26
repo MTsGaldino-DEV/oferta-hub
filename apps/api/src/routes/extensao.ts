@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { OfferSource, Platform } from '@prisma/client';
+import { OfferSource, OfferStatus, Platform } from '@prisma/client';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
@@ -119,11 +119,12 @@ export async function extensaoRoutes(app: FastifyInstance) {
               platform_externalId: { platform: bruto.platform, externalId: bruto.externalId },
             },
             include: {
-              // DISPATCHING entra pra nao recapturar um produto que esta no
-              // meio de um Disparo (a oferta ainda nao saiu, so ja foi
-              // reservada) -- sem isso a extensao criava uma segunda oferta
-              // pro mesmo produto enquanto o disparo estava rodando.
-              offers: { where: { status: { in: ['PENDING', 'QUEUED', 'DISPATCHING'] } }, take: 1 },
+              // SCANNED entra pra nao recapturar um produto ja esperando
+              // revisao na aba Manual. DISPATCHING entra pra nao recapturar
+              // um produto no meio de um Disparo (a oferta ainda nao saiu,
+              // so ja foi reservada) -- sem isso a extensao criava uma
+              // segunda oferta pro mesmo produto enquanto o disparo rodava.
+              offers: { where: { status: { in: ['SCANNED', 'PENDING', 'QUEUED', 'DISPATCHING'] } }, take: 1 },
             },
           });
           if (jaTem?.offers.length) {
@@ -131,11 +132,14 @@ export async function extensaoRoutes(app: FastifyInstance) {
             continue;
           }
 
-          await ingestProduct(normalizar(bruto), OfferSource.MANUAL, {
+          await ingestProduct(normalizar(bruto), OfferSource.SCAN, {
             // O meli.la do painel tem precedencia: e o unico link do ML que
             // atribui comissao de verdade. Sem ele o connector monta um com
             // matt_tool, que e o que da pra fazer sem a sessao do navegador.
             linkPronto: bruto.affiliateUrl,
+            // Nasce esperando revisao na aba Manual, nao direto na Fila --
+            // e o que separa captura crua de scan de curadoria ja aprovada.
+            status: OfferStatus.SCANNED,
           });
           resultado.criados++;
         } catch (err) {

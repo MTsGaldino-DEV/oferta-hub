@@ -104,6 +104,8 @@ export interface IngestOptions {
   linkPronto?: string;
   /** Nicho que produziu a oferta. Deixa a fila separada por prateleira. */
   nicheId?: string;
+  /** Status inicial da oferta. Default PENDING -- a extensao usa SCANNED. */
+  status?: OfferStatus;
 }
 
 export async function ingestProduct(
@@ -111,17 +113,18 @@ export async function ingestProduct(
   source: OfferSource,
   opcoes: IngestOptions = {},
 ): Promise<Offer> {
-  const { note, linkPronto, nicheId } = opcoes;
+  const { note, linkPronto, nicheId, status = OfferStatus.PENDING } = opcoes;
   const connector = connectors[found.platform];
   const product = await upsertProduct(found);
 
-  // A fila nao ganha nada com duas ofertas pendentes do mesmo produto -- so
-  // duplica trabalho de revisao. So PENDING bloqueia: uma oferta ja enviada,
-  // pulada ou falhada nao impede nascer uma nova (o preco pode ter caido de
-  // novo). Confere antes do link de afiliado pra nao gastar chamada de API
-  // da loja num clique repetido.
+  // A fila nao ganha nada com duas ofertas do mesmo produto esperando
+  // decisao -- so duplica trabalho de revisao. SCANNED (aguardando a aba
+  // Manual) conta junto de PENDING (aguardando a Fila): os dois sao "ja tem
+  // alguem revisando isso". Uma oferta ja enviada, pulada ou falhada nao
+  // impede nascer uma nova (o preco pode ter caido de novo). Confere antes
+  // do link de afiliado pra nao gastar chamada de API da loja num repetido.
   const pendente = await prisma.offer.findFirst({
-    where: { productId: product.id, status: OfferStatus.PENDING },
+    where: { productId: product.id, status: { in: [OfferStatus.PENDING, OfferStatus.SCANNED] } },
   });
   if (pendente) return pendente;
 
@@ -146,6 +149,7 @@ export async function ingestProduct(
     data: {
       productId: product.id,
       source,
+      status,
       price,
       comparePrice: found.listPrice,
       discountPct: scored.discountPct,
